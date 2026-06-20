@@ -13,6 +13,12 @@ $env:DB_PASSWORD="<local password>"
 .\mvnw.cmd spring-boot:run
 ```
 
+Windows command file:
+
+```cmd
+run-local.cmd
+```
+
 Swagger UI:
 
 ```text

@@ -15,6 +15,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 POSTGRESQL_LOCAL_CONNECTION_INFO.txt
+start_postgresql_and_connect.cmd
+run-front.cmd
+back/run-local.cmd
 TEST_RUN_COMMANDS.txt
 POSTGRESQL_INSTALL_STEPS.txt
 postgresql_*.log
