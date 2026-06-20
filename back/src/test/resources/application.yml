@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:showdown_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    defer-datasource-initialization: true
+    open-in-view: false
+    hibernate:
+      ddl-auto: create-drop
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:h2-enum-domains.sql
+
+showdown:
+  security:
+    admin-user: admin
+    admin-password: admin1234
+    referee-user: referee
+    referee-password: referee1234
+    player-user: player
+    player-password: player1234
