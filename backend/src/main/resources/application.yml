@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: showdown-backend
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+server:
+  port: ${SERVER_PORT:8080}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+showdown:
+  security:
+    admin-user: ${ADMIN_USER:admin}
+    admin-password: ${ADMIN_PASSWORD}
+    referee-user: ${REFEREE_USER:referee}
+    referee-password: ${REFEREE_PASSWORD}
+    player-user: ${PLAYER_USER:player}
+    player-password: ${PLAYER_PASSWORD}

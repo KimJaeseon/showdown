@@ -1,0 +1,247 @@
+package com.showdown.backend.service;
+
+import com.showdown.backend.api.dto.MatchDtos.MatchRequest;
+import com.showdown.backend.api.dto.ScheduleDtos.KnockoutGenerateRequest;
+import com.showdown.backend.api.dto.ScheduleDtos.RoundRobinGenerateRequest;
+import com.showdown.backend.api.dto.ScheduleDtos.ScheduleGenerateResponse;
+import com.showdown.backend.api.dto.ScheduleDtos.ScheduleReportResponse;
+import com.showdown.backend.domain.Match;
+import com.showdown.backend.domain.Official;
+import com.showdown.backend.domain.Stage;
+import com.showdown.backend.domain.TournamentGroup;
+import com.showdown.backend.domain.TournamentPlayer;
+import com.showdown.backend.repository.MatchRepository;
+import com.showdown.backend.repository.OfficialRepository;
+import com.showdown.backend.repository.StageRepository;
+import com.showdown.backend.repository.TournamentPlayerRepository;
+import jakarta.persistence.EntityNotFoundException;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+public class ScheduleService {
+    private final TournamentAdminService adminService;
+    private final TournamentPlayerRepository tournamentPlayers;
+    private final OfficialRepository officials;
+    private final StageRepository stages;
+    private final MatchRepository matches;
+
+    public ScheduleService(
+            TournamentAdminService adminService,
+            TournamentPlayerRepository tournamentPlayers,
+            OfficialRepository officials,
+            StageRepository stages,
+            MatchRepository matches
+    ) {
+        this.adminService = adminService;
+        this.tournamentPlayers = tournamentPlayers;
+        this.officials = officials;
+        this.stages = stages;
+        this.matches = matches;
+    }
+
+    public ScheduleGenerateResponse generateRoundRobin(UUID tournamentId, RoundRobinGenerateRequest request) {
+        validateGenerationRequest(request.groupCount(), request.courtNames(), request.matchDurationMinutes(), request.officialIds());
+        Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        List<TournamentPlayer> players = tournamentPlayers.findByTournamentIdOrderByDivisionSortOrderAscEntryNoAsc(tournamentId).stream()
+                .filter(player -> player.getDivision().getId().equals(request.divisionId()))
+                .toList();
+        List<List<TournamentPlayer>> groupedPlayers = splitPlayers(players, request.groupCount());
+        List<TournamentGroup> groups = createMissingGroups(tournamentId, stage, groupedPlayers.size());
+
+        List<UUID> createdMatchIds = new ArrayList<>();
+        int matchNo = request.matchNoStart();
+        int sequence = 0;
+        for (int groupIndex = 0; groupIndex < groupedPlayers.size(); groupIndex++) {
+            List<TournamentPlayer> groupPlayers = groupedPlayers.get(groupIndex);
+            for (int i = 0; i < groupPlayers.size(); i++) {
+                for (int j = i + 1; j < groupPlayers.size(); j++) {
+                    String court = request.courtNames().get(sequence % request.courtNames().size());
+                    OffsetDateTime scheduledAt = request.startAt().plusMinutes((long) request.matchDurationMinutes() * (sequence / request.courtNames().size()));
+                    List<UUID> refereeIds = rotatingOfficials(request.officialIds(), sequence);
+                    Match match = adminService.createMatch(tournamentId, new MatchRequest(
+                            request.divisionId(),
+                            request.stageId(),
+                            groups.get(groupIndex).getId(),
+                            matchNo++,
+                            scheduledAt,
+                            court,
+                            request.matchDurationMinutes(),
+                            null,
+                            refereeIds,
+                            groupPlayers.get(i).getId(),
+                            groupPlayers.get(j).getId(),
+                            null
+                    ));
+                    createdMatchIds.add(match.getId());
+                    sequence++;
+                }
+            }
+        }
+        return new ScheduleGenerateResponse(groups.size(), createdMatchIds.size(), createdMatchIds);
+    }
+
+    public ScheduleGenerateResponse generateKnockout(UUID tournamentId, KnockoutGenerateRequest request) {
+        validateGenerationRequest(1, request.courtNames(), request.matchDurationMinutes(), request.officialIds());
+        List<UUID> entrantIds = request.playerIds() == null || request.playerIds().isEmpty()
+                ? tournamentPlayers.findByTournamentIdOrderByDivisionSortOrderAscEntryNoAsc(tournamentId).stream()
+                        .filter(player -> player.getDivision().getId().equals(request.divisionId()))
+                        .limit(request.entrantCount())
+                        .map(TournamentPlayer::getId)
+                        .toList()
+                : request.playerIds();
+        if (entrantIds.size() != request.entrantCount() || entrantIds.size() % 2 != 0) {
+            throw new IllegalArgumentException("토너먼트 첫 라운드 참가자는 짝수이며 entrantCount와 일치해야 합니다.");
+        }
+
+        List<UUID> createdMatchIds = new ArrayList<>();
+        int matchNo = request.matchNoStart();
+        for (int i = 0; i < entrantIds.size(); i += 2) {
+            int sequence = i / 2;
+            String court = request.courtNames().get(sequence % request.courtNames().size());
+            OffsetDateTime scheduledAt = request.startAt().plusMinutes((long) request.matchDurationMinutes() * (sequence / request.courtNames().size()));
+            List<UUID> refereeIds = rotatingOfficials(request.officialIds(), sequence);
+            Match match = adminService.createMatch(tournamentId, new MatchRequest(
+                    request.divisionId(),
+                    request.stageId(),
+                    null,
+                    matchNo++,
+                    scheduledAt,
+                    court,
+                    request.matchDurationMinutes(),
+                    null,
+                    refereeIds,
+                    entrantIds.get(i),
+                    entrantIds.get(i + 1),
+                    null
+            ));
+            createdMatchIds.add(match.getId());
+        }
+        return new ScheduleGenerateResponse(0, createdMatchIds.size(), createdMatchIds);
+    }
+
+    @Transactional(readOnly = true)
+    public ScheduleReportResponse report(UUID tournamentId) {
+        List<Match> tournamentMatches = matches.findByTournamentIdOrderByScheduledAtAscMatchNoAsc(tournamentId);
+        Map<String, Long> matchesByCourt = tournamentMatches.stream()
+                .filter(match -> match.getCourtName() != null && !match.getCourtName().isBlank())
+                .collect(Collectors.groupingBy(Match::getCourtName, LinkedHashMap::new, Collectors.counting()));
+
+        long missingOfficials = tournamentMatches.stream()
+                .filter(match -> match.getMatchOfficials().size() < 2)
+                .count();
+        long courtConflicts = countCourtConflicts(tournamentMatches);
+        long officialConflicts = countOfficialConflicts(tournamentMatches);
+        return new ScheduleReportResponse(tournamentId, tournamentMatches.size(), matchesByCourt, courtConflicts, officialConflicts, missingOfficials);
+    }
+
+    private void validateGenerationRequest(int groupCount, List<String> courtNames, int matchDurationMinutes, List<UUID> officialIds) {
+        if (groupCount <= 0) {
+            throw new IllegalArgumentException("조 수는 1 이상이어야 합니다.");
+        }
+        if (courtNames == null || courtNames.isEmpty()) {
+            throw new IllegalArgumentException("코트 목록이 필요합니다.");
+        }
+        if (matchDurationMinutes <= 0) {
+            throw new IllegalArgumentException("경기 시간은 1분 이상이어야 합니다.");
+        }
+        if (officialIds == null || officialIds.size() < 2) {
+            throw new IllegalArgumentException("스케줄 생성을 위해 최소 2명의 심판이 필요합니다.");
+        }
+    }
+
+    private List<TournamentGroup> createMissingGroups(UUID tournamentId, Stage stage, int groupCount) {
+        List<TournamentGroup> groups = new ArrayList<>();
+        for (int i = 0; i < groupCount; i++) {
+            char code = (char) ('A' + i);
+            TournamentGroup group = adminService.createGroup(tournamentId, new com.showdown.backend.api.dto.GroupDtos.GroupRequest(
+                    stage.getDivision().getId(),
+                    stage.getId(),
+                    stage.getDivision().getCode() + "-" + code,
+                    stage.getDivision().getCode() + " Group " + code,
+                    com.showdown.backend.domain.GroupType.LEAGUE,
+                    i + 1
+            ));
+            groups.add(group);
+        }
+        return groups;
+    }
+
+    private List<List<TournamentPlayer>> splitPlayers(List<TournamentPlayer> players, int groupCount) {
+        List<List<TournamentPlayer>> groups = new ArrayList<>();
+        for (int i = 0; i < groupCount; i++) {
+            groups.add(new ArrayList<>());
+        }
+        for (int i = 0; i < players.size(); i++) {
+            groups.get(i % groupCount).add(players.get(i));
+        }
+        return groups;
+    }
+
+    private List<UUID> rotatingOfficials(List<UUID> officialIds, int sequence) {
+        if (officialIds.size() < 2) {
+            throw new IllegalArgumentException("심판 2명이 필요합니다.");
+        }
+        int first = (sequence * 2) % officialIds.size();
+        int second = (first + 1) % officialIds.size();
+        if (first == second) {
+            second = (second + 1) % officialIds.size();
+        }
+        return List.of(officialIds.get(first), officialIds.get(second));
+    }
+
+    private long countCourtConflicts(List<Match> matchesToCheck) {
+        long conflicts = 0;
+        List<Match> ordered = matchesToCheck.stream()
+                .filter(match -> match.getScheduledAt() != null && match.getCourtName() != null)
+                .sorted(Comparator.comparing(Match::getScheduledAt))
+                .toList();
+        for (int i = 0; i < ordered.size(); i++) {
+            for (int j = i + 1; j < ordered.size(); j++) {
+                if (ordered.get(i).getCourtName().equalsIgnoreCase(ordered.get(j).getCourtName()) && overlaps(ordered.get(i), ordered.get(j))) {
+                    conflicts++;
+                }
+            }
+        }
+        return conflicts;
+    }
+
+    private long countOfficialConflicts(List<Match> matchesToCheck) {
+        long conflicts = 0;
+        for (int i = 0; i < matchesToCheck.size(); i++) {
+            for (int j = i + 1; j < matchesToCheck.size(); j++) {
+                if (!overlaps(matchesToCheck.get(i), matchesToCheck.get(j))) {
+                    continue;
+                }
+                List<UUID> leftOfficials = matchesToCheck.get(i).getMatchOfficials().stream()
+                        .map(matchOfficial -> matchOfficial.getOfficial().getId())
+                        .toList();
+                boolean conflict = matchesToCheck.get(j).getMatchOfficials().stream()
+                        .map(matchOfficial -> matchOfficial.getOfficial().getId())
+                        .anyMatch(leftOfficials::contains);
+                if (conflict) {
+                    conflicts++;
+                }
+            }
+        }
+        return conflicts;
+    }
+
+    private boolean overlaps(Match left, Match right) {
+        if (left.getScheduledAt() == null || right.getScheduledAt() == null) {
+            return false;
+        }
+        OffsetDateTime leftEnd = left.getScheduledAt().plusMinutes(left.getDurationMinutes() == null ? 30 : left.getDurationMinutes());
+        OffsetDateTime rightEnd = right.getScheduledAt().plusMinutes(right.getDurationMinutes() == null ? 30 : right.getDurationMinutes());
+        return left.getScheduledAt().isBefore(rightEnd) && right.getScheduledAt().isBefore(leftEnd);
+    }
+}

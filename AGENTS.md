@@ -1,0 +1,72 @@
+# 🤖 에이전트 동작 및 코딩 규칙 (AGENTS.md)
+
+이 파일은 본 프로젝트의 개발 방향성과 협업 규칙을 정의합니다. 에이전트는 모든 작업 수행 시 아래 규칙을 반드시 준수해야 합니다.
+
+---
+
+## 1. 커뮤니케이션 및 문체
+- **언어**: 모든 작업, 답변과 주석, 문서 작성은 **한국어**를 사용합니다.
+- **설명**: 코드 변경 사항이 있을 때는 핵심 논리와 디자인 결정 이유를 명확하고 간결하게 설명합니다.
+
+---
+
+## 2. 기술 스택 및 개발 환경
+- **Frontend**: React, Next.js (HTML5 기반, Tailwind CSS 대신 순수 CSS/CSS Modules 선호)
+- **Backend**: Spring Boot (Maven 기반)
+- **Database & ORM**:
+  - PostgreSQL 사용
+  * **Spring Boot 백엔드**: Spring Data JPA (Hibernate)를 사용하여 데이터베이스에 접근합니다.
+  * **Next.js 프론트엔드 (필요시)**: Next.js API Routes 또는 BFF 구조로 직접 DB에 접근할 시에만 Prisma ORM을 사용합니다.
+- **디자인 시스템**: Sleek Dark Mode 기반의 현대적이고 프리미엄한 UI/UX 구현
+
+---
+
+## 3. 웹 접근성 (Accessibility, A11y) 및 코딩 규칙
+- **시맨틱 HTML 사용**: `<div>` 남용을 지양하고 `<header>`, `<main>`, `<nav>`, `<section>`, `<footer>` 등 적절한 시맨틱 태그를 필수적으로 사용합니다.
+- **WAI-ARIA 준수**: 
+  - 모달, 드롭다운 등 동적 컴포넌트 구현 시 `aria-expanded`, `aria-haspopup`, `role="dialog"` 등 적절한 ARIA 속성을 부여합니다.
+  - 이미지 요소에는 반드시 의미 있는 `alt` 속성을 작성합니다. (장식용 이미지일 경우 `alt=""` 명시)
+- **키보드 네비게이션**: 모든 대화형 요소는 키보드 Tab 키로 포커스가 이동할 수 있어야 하며, 포커스 상태 시 시각적 표시(`:focus-visible` 등)가 명확해야 합니다.
+- **색상 대비**: 텍스트와 배경의 명도 대비는 최소 4.5:1 이상(WCAG AA 기준)을 유지하여 저시력자도 쉽게 읽을 수 있도록 합니다.
+
+---
+
+## 4. 설계 및 아키텍처 규칙 (Design & Architecture)
+- **단일 책임 원칙(SRP)**: 함수, 클래스, 컴포넌트는 오직 하나의 역할(책임)만 가지도록 설계합니다.
+- **레이어 아키텍처**: 
+  - **Spring Boot**: Controller - Service - Repository (JPA Entity) 구조로 역할을 명확히 분리합니다.
+  - **Next.js**: View(컴포넌트) - Logic(Hooks) - API 호출(Service) 레이어를 분리합니다.
+- **예외 처리 (Error Handling)**:
+  - **Spring Boot**: `@RestControllerAdvice` 등을 활용한 글로벌 예외 처리를 구현하고, 비동기 로직 및 데이터베이스 접근에는 적절한 Exception Handling을 수행합니다.
+  - **Client**: 사용자에게는 시스템 내부 에러 메시지를 노출하지 않고 사용자 친화적인 메시지와 상태 코드를 반환합니다.
+
+---
+
+## 5. 보안 규칙 (Security)
+- **민감 정보 관리**:
+  - API Key, DB 비밀번호, JWT Secret Key 등 모든 민감 정보는 소스코드나 설정 파일(application.properties, application.yml 등)에 절대 하드코딩하지 않습니다.
+  - 외부 환경변수(OS Level 또는 `.env`)에 정의하고, Spring Boot는 `${ENV_VAR}` 형식으로, Next.js는 `process.env.ENV_VAR` 형식으로 참조합니다.
+  - `.env` 및 민감한 로컬 설정 파일은 `.gitignore`에 등록하여 Git에 절대 노출되지 않도록 합니다.
+- **안전한 데이터 저장**: 사용자 비밀번호는 절대 평문으로 저장하지 않으며, `BCryptPasswordEncoder` (Spring Security) 또는 안전한 해시 함수를 사용하여 암호화 후 데이터베이스에 저장합니다.
+- **인젝션 및 취약점 방지**:
+  - SQL Injection을 방지하기 위해 JPA의 JPQL/Criteria 혹은 QueryDSL을 활용한 Parameterized Query 방식을 고수하며, Native Query 작성을 통한 하드코딩은 지양합니다.
+  - XSS 방지를 위해 클라이언트 입력값 검증(Validation) 및 이스케이프(Sanitization) 처리를 적용합니다.
+- **인증 및 인가**: 중요 리소스나 API 엔드포인트에는 JWT(JSON Web Token) 등을 활용한 인증 처리 및 역할 기반 권한 제어(RBAC) 인터셉터/필터를 반드시 적용합니다.
+
+---
+
+## 6. 테스트 규칙 (Testing)
+- **테스트 프레임워크**:
+  - **Spring Boot**: `JUnit 5`, `Mockito`, `AssertJ`를 사용하여 테스트를 작성합니다.
+  - **Next.js**: `Jest` 및 `React Testing Library`를 사용하여 테스트를 작성합니다.
+- **테스트 대상**:
+  - 핵심 비즈니스 로직(Spring Boot Service 레이어, React Custom Hooks)은 반드시 **단위 테스트(Unit Test)**를 작성합니다.
+  - 주요 API 엔드포인트는 정상 상태(Happy Path)뿐만 아니라 실패 상황(Edge Case / Exception)까지 검증하는 **통합 테스트(Integration Test)**를 작성합니다.
+- **모의 객체(Mocking) 활용**: 외부 API 연동이나 데이터베이스 직접 호출 등 종속성이 포함된 로직은 Mock(Mockito mock, Jest mock 등)을 활용해 격리된 상태에서 검증합니다.
+
+---
+
+## 7. 작업 방식 및 검증
+- **작업 전 계획**: 복잡한 변경 작업을 시작하기 전에 항상 구현 계획을 수립하고 확인을 받습니다.
+- **자가 검증**: 변경을 완료한 후 빌드 오류가 없는지, 린트(Lint) 에러가 없는지 스스로 명령어를 실행하여 검증합니다.
+- **테스트 확인**: 코드를 수정한 후에는 관련 테스트 코드가 모두 통과(Pass)하는지 검증을 수행합니다.
