@@ -10,6 +10,7 @@ import com.showdown.backend.api.dto.PlayerDtos.TournamentPlayerRequest;
 import com.showdown.backend.api.dto.StageDtos.StageRequest;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentRequest;
 import com.showdown.backend.api.dto.UserDtos.UserRequest;
+import com.showdown.backend.api.ApiConflictException;
 import com.showdown.backend.domain.AppUser;
 import com.showdown.backend.domain.Division;
 import com.showdown.backend.domain.Match;
@@ -119,13 +120,16 @@ public class TournamentAdminService {
     }
 
     public TournamentPlayer createTournamentPlayer(UUID tournamentId, TournamentPlayerRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        Division division = getDivision(request.divisionId());
+        requireSameTournament(tournament, division.getTournament(), "부문");
         Player player = new Player();
         applyPlayer(player, request);
         players.save(player);
 
         TournamentPlayer entry = new TournamentPlayer();
-        entry.setTournament(getTournament(tournamentId));
-        entry.setDivision(getDivision(request.divisionId()));
+        entry.setTournament(tournament);
+        entry.setDivision(division);
         entry.setPlayer(player);
         applyTournamentPlayer(entry, request);
         return tournamentPlayers.save(entry);
@@ -161,8 +165,11 @@ public class TournamentAdminService {
     }
 
     public Stage createStage(UUID tournamentId, StageRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        Division division = getDivision(request.divisionId());
+        requireSameTournament(tournament, division.getTournament(), "부문");
         Stage stage = new Stage();
-        stage.setTournament(getTournament(tournamentId));
+        stage.setTournament(tournament);
         applyStage(stage, request);
         return stages.save(stage);
     }
@@ -178,8 +185,16 @@ public class TournamentAdminService {
     }
 
     public TournamentGroup createGroup(UUID tournamentId, GroupRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        Division division = getDivision(request.divisionId());
+        Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        requireSameTournament(tournament, division.getTournament(), "부문");
+        requireSameTournament(tournament, stage.getTournament(), "단계");
+        if (!stage.getDivision().getId().equals(division.getId())) {
+            throw new IllegalArgumentException("단계와 조의 부문이 일치하지 않습니다.");
+        }
         TournamentGroup group = new TournamentGroup();
-        group.setTournament(getTournament(tournamentId));
+        group.setTournament(tournament);
         applyGroup(group, request);
         return groups.save(group);
     }
@@ -195,6 +210,7 @@ public class TournamentAdminService {
     }
 
     public Match createMatch(UUID tournamentId, MatchRequest request) {
+        validateMatchReferences(getTournament(tournamentId), request);
         Match match = new Match();
         match.setTournament(getTournament(tournamentId));
         applyMatch(match, request);
@@ -214,7 +230,7 @@ public class TournamentAdminService {
     public Match updateMatchSets(UUID matchId, MatchSetsUpdateRequest request) {
         Match match = getMatch(matchId);
         if (!match.getVersion().equals(request.version())) {
-            throw new IllegalArgumentException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
+            throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
         }
         if (request.sets() == null || request.sets().isEmpty()) {
             throw new IllegalArgumentException("세트 점수는 최소 1개 이상이어야 합니다.");
@@ -372,7 +388,39 @@ public class TournamentAdminService {
         match.setScheduledAt(request.scheduledAt());
         match.setPlayer1(getTournamentPlayer(request.player1TournamentPlayerId()));
         match.setPlayer2(getTournamentPlayer(request.player2TournamentPlayerId()));
+        if (request.player1TournamentPlayerId().equals(request.player2TournamentPlayerId())) {
+            throw new IllegalArgumentException("같은 선수를 경기 양쪽에 배정할 수 없습니다.");
+        }
         match.setStatus(request.status() == null ? MatchStatus.SCHEDULED : request.status());
+    }
+
+    private void validateMatchReferences(Tournament tournament, MatchRequest request) {
+        Division division = getDivision(request.divisionId());
+        Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        TournamentPlayer player1 = getTournamentPlayer(request.player1TournamentPlayerId());
+        TournamentPlayer player2 = getTournamentPlayer(request.player2TournamentPlayerId());
+        requireSameTournament(tournament, division.getTournament(), "부문");
+        requireSameTournament(tournament, stage.getTournament(), "단계");
+        requireSameTournament(tournament, player1.getTournament(), "선수 1");
+        requireSameTournament(tournament, player2.getTournament(), "선수 2");
+        if (!stage.getDivision().getId().equals(division.getId())
+                || !player1.getDivision().getId().equals(division.getId())
+                || !player2.getDivision().getId().equals(division.getId())) {
+            throw new IllegalArgumentException("경기의 단계와 선수는 같은 부문에 속해야 합니다.");
+        }
+        if (request.groupId() != null) {
+            TournamentGroup group = getGroup(request.groupId());
+            requireSameTournament(tournament, group.getTournament(), "조");
+            if (!group.getStage().getId().equals(stage.getId()) || !group.getDivision().getId().equals(division.getId())) {
+                throw new IllegalArgumentException("경기의 조, 단계와 부문이 일치하지 않습니다.");
+            }
+        }
+    }
+
+    private void requireSameTournament(Tournament expected, Tournament actual, String resourceName) {
+        if (!expected.getId().equals(actual.getId())) {
+            throw new IllegalArgumentException(resourceName + "이(가) 요청한 대회에 속하지 않습니다.");
+        }
     }
 
     private void applyUser(AppUser user, UserRequest request) {
