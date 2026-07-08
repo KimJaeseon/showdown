@@ -268,8 +268,9 @@ class ShowdownScenarioReportTests {
     }
 
     private void writeReports(String tournamentId, ScenarioSummary summary, List<List<String>> maleGroups, List<List<String>> femaleGroups) throws Exception {
-        Path resultPath = Path.of("..", "테스트시나리오_실행결과.txt").normalize();
-        Path changePath = Path.of("..", "테스트시나리오_기능변경필요사항.txt").normalize();
+        Path reportDirectory = Path.of("..", "docs", "testing").normalize();
+        Path resultPath = reportDirectory.resolve("테스트시나리오_실행결과.txt");
+        Path changePath = reportDirectory.resolve("테스트시나리오_기능변경필요사항.txt");
 
         String result = """
                 테스트 시나리오 실행 결과
@@ -337,6 +338,7 @@ class ShowdownScenarioReportTests {
                 - 운영 화면에서 요구사항 충족 여부를 확인하려면 총 경기 수, 코트별 경기 수, 시간대별 충돌, 심판 배정 누락을 요약하는 조회 기능이 있으면 좋습니다.
                 """;
 
+        Files.createDirectories(reportDirectory);
         Files.writeString(resultPath, result, StandardCharsets.UTF_8);
         Files.writeString(changePath, change, StandardCharsets.UTF_8);
     }
