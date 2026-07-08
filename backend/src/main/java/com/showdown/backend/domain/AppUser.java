@@ -6,6 +6,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
@@ -31,6 +33,10 @@ public class AppUser extends BaseEntity {
 
     @Column(name = "is_active", nullable = false)
     private Boolean active = true;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "tournament_player_id")
+    private TournamentPlayer tournamentPlayer;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<UserRole> userRoles = new ArrayList<>();
@@ -96,5 +102,13 @@ public class AppUser extends BaseEntity {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public TournamentPlayer getTournamentPlayer() {
+        return tournamentPlayer;
+    }
+
+    public void setTournamentPlayer(TournamentPlayer tournamentPlayer) {
+        this.tournamentPlayer = tournamentPlayer;
     }
 }

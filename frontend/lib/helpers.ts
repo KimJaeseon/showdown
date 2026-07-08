@@ -2,6 +2,7 @@ import type {
   Division,
   Group,
   Match,
+  MatchEndReason,
   MatchSet,
   MatchStatus,
   Player,
@@ -61,12 +62,12 @@ export function getPlayerMeta(
 }
 
 export function getDivisionName(divisionId: string, divisions: Division[]) {
-  return divisions.find((division) => division.id === divisionId)?.name ?? "미지정 부문";
+  return divisions.find((division) => division.id === divisionId)?.name ?? "미정 부문";
 }
 
 export function getGroupName(groupId: string | undefined, groups: Group[]) {
-  if (!groupId) return "미지정 그룹";
-  return groups.find((group) => group.id === groupId)?.name ?? "미지정 그룹";
+  if (!groupId) return "미정 그룹";
+  return groups.find((group) => group.id === groupId)?.name ?? "미정 그룹";
 }
 
 export function matchStatusLabel(status: MatchStatus) {
@@ -75,16 +76,26 @@ export function matchStatusLabel(status: MatchStatus) {
     running: "진행 중",
     completed: "완료",
     cancelled: "취소",
-    walkover: "부전승",
+    walkover: "특수 종료",
   };
   return labels[status];
 }
 
+export function matchEndReasonLabel(reason: MatchEndReason) {
+  const labels: Record<MatchEndReason, string> = {
+    normal: "정상 종료",
+    giving_up: "기권승",
+    default_loss: "몰수패",
+    bye: "BYE",
+  };
+  return labels[reason];
+}
+
 export function formatSets(sets: MatchSet[]) {
   if (sets.length === 0) return "세트 점수 없음";
-  return sets
+  return [...sets]
     .sort((a, b) => a.setNo - b.setNo)
-    .map((set) => `${set.player1Score}대${set.player2Score}`)
+    .map((set) => `${set.player1Score}:${set.player2Score}`)
     .join(", ");
 }
 
@@ -97,14 +108,15 @@ export function describeMatch(
   const player1 = getPlayerName(match.player1TournamentPlayerId, tournamentPlayers, players);
   const player2 = getPlayerName(match.player2TournamentPlayerId, tournamentPlayers, players);
   const result =
-    match.status === "completed" && match.winnerTournamentPlayerId
+    match.winnerTournamentPlayerId
       ? `${getPlayerName(match.winnerTournamentPlayerId, tournamentPlayers, players)} 승리`
       : matchStatusLabel(match.status);
+  const reason = match.endReason !== "normal" ? ` 종료 사유는 ${matchEndReasonLabel(match.endReason)}.` : "";
 
-  return `경기 ${match.matchNo}번. ${formatMatchTime(match.scheduledAt)}. ${match.courtName}. ${getGroupName(
+  return `경기 ${match.matchNo}번 ${formatMatchTime(match.scheduledAt)}. ${match.courtName}. ${getGroupName(
     match.groupId,
     groups,
-  )}. 선수 1은 ${player1}. 선수 2는 ${player2}. 결과는 ${result}. 세트 점수는 ${formatSets(
+  )}. 선수 1은 ${player1}. 선수 2는 ${player2}. 결과는 ${result}.${reason} 세트 점수는 ${formatSets(
     match.sets,
   )}.`;
 }

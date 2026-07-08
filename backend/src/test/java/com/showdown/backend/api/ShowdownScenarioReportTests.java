@@ -94,7 +94,7 @@ class ShowdownScenarioReportTests {
 
         JsonNode persistedMatches = getAdmin("/api/admin/tournaments/" + tournamentId + "/matches");
         ScenarioSummary summary = summarize(createdMatches, persistedMatches);
-        writeReports(tournamentId, summary, maleGroups, femaleGroups);
+        // 검증 테스트는 저장소 문서를 수정하지 않는다. 결과는 assertion과 테스트 리포트로만 남긴다.
     }
 
     private List<String> createPlayers(String tournamentId, String divisionId, String prefix, int count) throws Exception {
@@ -169,37 +169,56 @@ class ShowdownScenarioReportTests {
         List<MatchPlan> plans = new ArrayList<>();
         OffsetDateTime start = LocalDateTime.of(2026, 6, 27, 9, 30).atOffset(KST);
         int matchNo = matchNoStart;
-        int sequence = 0;
+        Map<String, OffsetDateTime> playerAvailableAt = new HashMap<>();
+        Map<String, OffsetDateTime> courtAvailableAt = new HashMap<>();
+        courtNumbers.forEach(court -> courtAvailableAt.put(court, start));
         for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
             List<String> groupPlayers = groups.get(groupIndex);
             for (int i = 0; i < groupPlayers.size(); i++) {
                 for (int j = i + 1; j < groupPlayers.size(); j++) {
-                    String court = courtNumbers.get(sequence % courtNumbers.size());
-                    OffsetDateTime scheduledAt = start.plusMinutes(15L * (sequence / courtNumbers.size()));
+                    String player1 = groupPlayers.get(i);
+                    String player2 = groupPlayers.get(j);
+                    String court = courtNumbers.stream().min((left, right) -> earliestStart(left, player1, player2, courtAvailableAt, playerAvailableAt, start)
+                            .compareTo(earliestStart(right, player1, player2, courtAvailableAt, playerAvailableAt, start))).orElseThrow();
+                    OffsetDateTime scheduledAt = earliestStart(court, player1, player2, courtAvailableAt, playerAvailableAt, start);
                     plans.add(new MatchPlan(divisionId, stageId, groupIds.get(groupIndex), matchNo++, scheduledAt, court, groupPlayers.get(i), groupPlayers.get(j), "조별리그"));
-                    sequence++;
+                    OffsetDateTime availableAt = scheduledAt.plusMinutes(15);
+                    courtAvailableAt.put(court, availableAt);
+                    playerAvailableAt.put(player1, availableAt);
+                    playerAvailableAt.put(player2, availableAt);
                 }
             }
         }
         return plans;
     }
 
+    private OffsetDateTime earliestStart(String court, String player1, String player2,
+            Map<String, OffsetDateTime> courtAvailableAt, Map<String, OffsetDateTime> playerAvailableAt, OffsetDateTime start) {
+        OffsetDateTime result = courtAvailableAt.getOrDefault(court, start);
+        if (playerAvailableAt.getOrDefault(player1, start).isAfter(result)) result = playerAvailableAt.get(player1);
+        if (playerAvailableAt.getOrDefault(player2, start).isAfter(result)) result = playerAvailableAt.get(player2);
+        return result;
+    }
+
     private List<MatchPlan> planKnockout(String divisionId, String stageId, List<String> seededPlayers, List<String> courtNumbers, int matchNoStart, String firstRoundName) {
         List<MatchPlan> plans = new ArrayList<>();
         OffsetDateTime start = LocalDateTime.of(2026, 6, 28, 9, 30).atOffset(KST);
+        OffsetDateTime roundStart = start;
         int matchNo = matchNoStart;
-        int sequence = 0;
         List<String> currentRoundPlayers = new ArrayList<>(seededPlayers);
         String roundName = firstRoundName;
         while (currentRoundPlayers.size() >= 2) {
             List<String> nextRoundPlaceholders = new ArrayList<>();
+            int roundMatchCount = currentRoundPlayers.size() / 2;
             for (int i = 0; i < currentRoundPlayers.size(); i += 2) {
-                String court = courtNumbers.get(sequence % courtNumbers.size());
-                OffsetDateTime scheduledAt = start.plusMinutes(30L * (sequence / courtNumbers.size()));
+                int roundSequence = i / 2;
+                String court = courtNumbers.get(roundSequence % courtNumbers.size());
+                OffsetDateTime scheduledAt = roundStart.plusMinutes(30L * (roundSequence / courtNumbers.size()));
                 plans.add(new MatchPlan(divisionId, stageId, null, matchNo++, scheduledAt, court, currentRoundPlayers.get(i), currentRoundPlayers.get(i + 1), roundName));
                 nextRoundPlaceholders.add(currentRoundPlayers.get(i));
-                sequence++;
             }
+            long slots = (roundMatchCount + courtNumbers.size() - 1L) / courtNumbers.size();
+            roundStart = roundStart.plusMinutes(30L * slots);
             currentRoundPlayers = nextRoundPlaceholders;
             roundName = "다음 라운드";
         }

@@ -7,7 +7,7 @@ Tournament operation platform with a Spring Boot backend, Next.js frontend, and 
 ```text
 backend/       Spring Boot API server
 frontend/      Next.js web application
-database/sql/  PostgreSQL schema and seed scripts
+database/sql/  PostgreSQL/Flyway schema and seed migrations
 docs/design/   Architecture and database design documents
 docs/testing/  Test scenarios and test reports
 local/         Local-only notes, logs, and command files ignored by Git

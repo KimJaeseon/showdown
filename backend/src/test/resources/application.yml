@@ -18,6 +18,7 @@ spring:
 
 showdown:
   security:
+    mode: memory
     admin-user: admin
     admin-password: admin1234
     referee-user: referee

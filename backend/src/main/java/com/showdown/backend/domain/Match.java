@@ -53,6 +53,9 @@ public class Match extends BaseEntity {
     @Column(name = "duration_minutes")
     private Integer durationMinutes;
 
+    @Column(name = "max_sets", nullable = false)
+    private Integer maxSets = 3;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "winner_tournament_player_id")
     private TournamentPlayer winner;
@@ -60,6 +63,13 @@ public class Match extends BaseEntity {
     @Column(nullable = false, length = 30)
     @ColumnTransformer(write = "?::match_status")
     private MatchStatus status = MatchStatus.SCHEDULED;
+
+    @Column(name = "end_reason", nullable = false, length = 30)
+    @ColumnTransformer(write = "?::match_end_reason")
+    private MatchEndReason endReason = MatchEndReason.NORMAL;
+
+    @Column(name = "result_note")
+    private String resultNote;
 
     @Column(name = "player1_sets_won", nullable = false)
     private Integer player1SetsWon = 0;
@@ -150,6 +160,9 @@ public class Match extends BaseEntity {
         this.durationMinutes = durationMinutes;
     }
 
+    public Integer getMaxSets() { return maxSets; }
+    public void setMaxSets(Integer maxSets) { this.maxSets = maxSets; }
+
     public TournamentPlayer getPlayer1() {
         return getMatchPlayer(MatchSide.PLAYER1)
                 .map(MatchPlayer::getTournamentPlayer)
@@ -184,6 +197,22 @@ public class Match extends BaseEntity {
 
     public void setStatus(MatchStatus status) {
         this.status = status;
+    }
+
+    public MatchEndReason getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(MatchEndReason endReason) {
+        this.endReason = endReason;
+    }
+
+    public String getResultNote() {
+        return resultNote;
+    }
+
+    public void setResultNote(String resultNote) {
+        this.resultNote = resultNote;
     }
 
     public Integer getPlayer1SetsWon() {

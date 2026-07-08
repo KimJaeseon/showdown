@@ -1,4 +1,4 @@
--- Showdown Tournament 스키마 생성 스크립트
+-- Showdown Tournament 스키마 생성 스크립트 (Flyway V1)
 -- 대상 DBMS: PostgreSQL 15 이상
 -- 실행 전 showdown_tournament 데이터베이스에 접속해야 한다.
 
@@ -13,6 +13,7 @@ CREATE TYPE stage_type AS ENUM ('round_robin', 'knockout', 'placement');
 CREATE TYPE stage_status AS ENUM ('draft', 'published', 'running', 'finished');
 CREATE TYPE group_type AS ENUM ('league', 'knockout', 'placement');
 CREATE TYPE match_status AS ENUM ('scheduled', 'running', 'completed', 'cancelled', 'walkover');
+CREATE TYPE match_end_reason AS ENUM ('normal', 'giving_up', 'default_loss', 'bye');
 CREATE TYPE match_side AS ENUM ('player1', 'player2');
 CREATE TYPE point_event_type AS ENUM ('goal', 'fault', 'penalty', 'correction');
 CREATE TYPE assignment_source AS ENUM ('auto', 'manual', 'imported');
@@ -212,12 +213,15 @@ CREATE TABLE matches (
     scheduled_at timestamptz,
     court_name varchar(80),
     duration_minutes integer,
+    max_sets integer NOT NULL DEFAULT 3,
     court_id uuid REFERENCES courts(id) ON DELETE SET NULL,
     referee_id uuid REFERENCES officials(id) ON DELETE SET NULL,
     schedule_source assignment_source NOT NULL DEFAULT 'manual',
     schedule_locked boolean NOT NULL DEFAULT false,
     manual_note text,
     status match_status NOT NULL DEFAULT 'scheduled',
+    end_reason match_end_reason NOT NULL DEFAULT 'normal',
+    result_note text,
     winner_tournament_player_id uuid REFERENCES tournament_players(id) ON DELETE SET NULL,
     player1_match_points integer NOT NULL DEFAULT 0,
     player2_match_points integer NOT NULL DEFAULT 0,
@@ -232,6 +236,7 @@ CREATE TABLE matches (
     CONSTRAINT uq_matches_tournament_match_no UNIQUE (tournament_id, match_no),
     CONSTRAINT ck_matches_match_no_positive CHECK (match_no > 0),
     CONSTRAINT ck_matches_duration_positive CHECK (duration_minutes IS NULL OR duration_minutes > 0),
+    CONSTRAINT ck_matches_max_sets CHECK (max_sets IN (1, 3, 5)),
     CONSTRAINT ck_matches_points_non_negative CHECK (
         player1_match_points >= 0
         AND player2_match_points >= 0
@@ -243,6 +248,10 @@ CREATE TABLE matches (
     CONSTRAINT ck_matches_version_positive CHECK (version > 0),
     CONSTRAINT ck_matches_winner_required CHECK (
         status NOT IN ('completed', 'walkover') OR winner_tournament_player_id IS NOT NULL
+    ),
+    CONSTRAINT ck_matches_end_reason_status CHECK (
+        (status = 'walkover' AND end_reason IN ('giving_up', 'default_loss', 'bye'))
+        OR (status <> 'walkover' AND end_reason = 'normal')
     )
 );
 
@@ -301,6 +310,7 @@ CREATE TABLE users (
     email varchar(254) NOT NULL,
     password_hash text NOT NULL,
     display_name varchar(120) NOT NULL,
+    tournament_player_id uuid REFERENCES tournament_players(id) ON DELETE SET NULL,
     is_active boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

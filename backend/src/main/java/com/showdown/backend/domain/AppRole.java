@@ -3,7 +3,7 @@ package com.showdown.backend.domain;
 public enum AppRole {
     ADMIN("system_admin"),
     REFEREE("scorer"),
-    PLAYER("viewer");
+    PLAYER("player");
 
     private final String roleCode;
 

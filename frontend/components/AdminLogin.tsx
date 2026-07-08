@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { saveAuthSession } from "@/lib/auth";
-import type { BasicAuthSession } from "@/lib/api";
+import { verifyAuth, type BasicAuthSession } from "@/lib/api";
 
 export function AdminLogin() {
   const [draft, setDraft] = useState<BasicAuthSession>({
@@ -13,15 +13,18 @@ export function AdminLogin() {
   });
   const [message, setMessage] = useState("계정 정보를 입력하면 인증 정보가 현재 브라우저 세션에만 저장됩니다.");
 
-  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    saveAuthSession(draft);
-    setMessage(`${draft.role} 역할로 로그인 정보를 저장했습니다. 이동합니다.`);
-
-    const nextPath = draft.role === "REFEREE" ? "/admin/scoring" : draft.role === "PLAYER" ? "/players" : "/admin";
-    window.setTimeout(() => {
+    setMessage("서버에서 계정 정보를 확인하고 있습니다.");
+    try {
+      await verifyAuth(draft);
+      saveAuthSession(draft);
+      setMessage("로그인에 성공했습니다. 이동합니다.");
+      const nextPath = draft.role === "REFEREE" ? "/admin/scoring" : draft.role === "PLAYER" ? "/players" : "/admin";
       window.location.href = nextPath;
-    }, 150);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "로그인에 실패했습니다.");
+    }
   }
 
   return (
@@ -89,7 +92,7 @@ export function AdminLogin() {
                 required
               />
             </label>
-            <button type="submit">로그인 정보 저장</button>
+            <button type="submit">로그인</button>
           </form>
         </section>
       </main>

@@ -15,6 +15,7 @@ public final class UserDtos {
             @NotBlank String password,
             @NotBlank String displayName,
             @NotNull AppRole role,
+            UUID tournamentPlayerId,
             Boolean active
     ) {
     }
@@ -24,6 +25,7 @@ public final class UserDtos {
             String email,
             String displayName,
             AppRole role,
+            UUID tournamentPlayerId,
             Boolean active
     ) {
     }

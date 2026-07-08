@@ -4,4 +4,5 @@ CREATE DOMAIN IF NOT EXISTS participant_status AS varchar(30);
 CREATE DOMAIN IF NOT EXISTS stage_type AS varchar(30);
 CREATE DOMAIN IF NOT EXISTS group_type AS varchar(30);
 CREATE DOMAIN IF NOT EXISTS match_status AS varchar(30);
+CREATE DOMAIN IF NOT EXISTS match_end_reason AS varchar(30);
 CREATE DOMAIN IF NOT EXISTS match_side AS varchar(30);

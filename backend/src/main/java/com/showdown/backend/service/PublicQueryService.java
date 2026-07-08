@@ -6,12 +6,14 @@ import com.showdown.backend.domain.MatchStatus;
 import com.showdown.backend.domain.Tournament;
 import com.showdown.backend.domain.TournamentGroup;
 import com.showdown.backend.domain.TournamentPlayer;
+import com.showdown.backend.domain.TournamentStatus;
 import com.showdown.backend.repository.DivisionRepository;
 import com.showdown.backend.repository.GroupRepository;
 import com.showdown.backend.repository.MatchRepository;
 import com.showdown.backend.repository.MatchSetRepository;
 import com.showdown.backend.repository.TournamentPlayerRepository;
 import com.showdown.backend.repository.TournamentRepository;
+import com.showdown.backend.repository.RankingSnapshotRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +29,7 @@ public class PublicQueryService {
     private final GroupRepository groups;
     private final MatchRepository matches;
     private final MatchSetRepository matchSets;
+    private final RankingSnapshotRepository rankings;
 
     public PublicQueryService(
             TournamentRepository tournaments,
@@ -34,7 +37,8 @@ public class PublicQueryService {
             TournamentPlayerRepository tournamentPlayers,
             GroupRepository groups,
             MatchRepository matches,
-            MatchSetRepository matchSets
+            MatchSetRepository matchSets,
+            RankingSnapshotRepository rankings
     ) {
         this.tournaments = tournaments;
         this.divisions = divisions;
@@ -42,14 +46,16 @@ public class PublicQueryService {
         this.groups = groups;
         this.matches = matches;
         this.matchSets = matchSets;
+        this.rankings = rankings;
     }
 
     public List<Tournament> findTournaments() {
-        return tournaments.findAll();
+        return tournaments.findAll().stream().filter(this::isPublic).toList();
     }
 
     public Tournament getTournamentByCode(String code) {
-        return tournaments.findByCode(code).orElseThrow(() -> new EntityNotFoundException("대회를 찾을 수 없습니다."));
+        return tournaments.findByCode(code).filter(this::isPublic)
+                .orElseThrow(() -> new EntityNotFoundException("공개된 대회를 찾을 수 없습니다."));
     }
 
     public List<Division> getDivisions(String code) {
@@ -79,5 +85,16 @@ public class PublicQueryService {
 
     public List<com.showdown.backend.domain.MatchSet> getMatchSets(UUID matchId) {
         return matchSets.findByMatchIdOrderBySetNoAsc(matchId);
+    }
+
+    public List<com.showdown.backend.domain.RankingSnapshot> getRankings(String code) {
+        Tournament tournament = getTournamentByCode(code);
+        return rankings.findByTournamentIdOrderByDivisionSortOrderAscRankNoAsc(tournament.getId());
+    }
+
+    private boolean isPublic(Tournament tournament) {
+        return tournament.getStatus() == TournamentStatus.PUBLISHED
+                || tournament.getStatus() == TournamentStatus.RUNNING
+                || tournament.getStatus() == TournamentStatus.FINISHED;
     }
 }

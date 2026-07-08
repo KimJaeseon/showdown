@@ -10,8 +10,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.showdown.backend.domain.AppUser;
+import com.showdown.backend.repository.AppUserRepository;
+import com.showdown.backend.repository.TournamentPlayerRepository;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -26,12 +30,20 @@ class ShowdownApiIntegrationTests {
     private static final String ADMIN_PASSWORD = "admin1234";
     private static final String REFEREE_USER = "referee";
     private static final String REFEREE_PASSWORD = "referee1234";
+    private static final String PLAYER_USER = "player";
+    private static final String PLAYER_PASSWORD = "player1234";
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private AppUserRepository users;
+
+    @Autowired
+    private TournamentPlayerRepository tournamentPlayers;
 
     @Test
     void adminCrudPublicReadAndScoringFlowWorks() throws Exception {
@@ -101,6 +113,24 @@ class ShowdownApiIntegrationTests {
         ));
         String groupId = group.get("id").asText();
 
+        postAdmin("/api/admin/groups/" + groupId + "/members", Map.of(
+                "tournamentPlayerId", player1.get("id").asText(), "slotNo", 1));
+        postAdmin("/api/admin/groups/" + groupId + "/members", Map.of(
+                "tournamentPlayerId", player2.get("id").asText(), "slotNo", 2));
+        mockMvc.perform(get("/api/admin/groups/" + groupId + "/round-robin/preview")
+                        .with(httpBasic(ADMIN_USER, ADMIN_PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expectedMatchCount").value(1))
+                .andExpect(jsonPath("$.matches", hasSize(1)));
+
+        mockMvc.perform(post("/api/admin/groups/" + groupId + "/members")
+                        .with(httpBasic(ADMIN_USER, ADMIN_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "tournamentPlayerId", player1.get("id").asText(), "slotNo", 3))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
         JsonNode referee1 = postAdmin("/api/admin/tournaments/" + tournamentId + "/officials", Map.of(
                 "name", "Ref API 1",
                 "shortCode", "RA1",
@@ -158,9 +188,96 @@ class ShowdownApiIntegrationTests {
                 .andExpect(jsonPath("$.player2SetsWon").value(1))
                 .andExpect(jsonPath("$.sets", hasSize(3)));
 
+        mockMvc.perform(put("/api/scoring/matches/" + matchId + "/sets")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", version,
+                                "sets", new Object[] {Map.of("setNo", 1, "player1Score", 11, "player2Score", 7)}
+                        ))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+
+        AppUser playerUser = new AppUser();
+        playerUser.setEmail(PLAYER_USER);
+        playerUser.setDisplayName("Alice Portal");
+        playerUser.setPasswordHash("{noop}unused");
+        playerUser.setActive(true);
+        playerUser.setTournamentPlayer(tournamentPlayers.findById(UUID.fromString(player1.get("id").asText())).orElseThrow());
+        users.save(playerUser);
+
+        mockMvc.perform(get("/api/player/me").with(httpBasic(PLAYER_USER, PLAYER_PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.player.id").value(player1.get("id").asText()))
+                .andExpect(jsonPath("$.completedMatches", hasSize(1)))
+                .andExpect(jsonPath("$.stats.matchesPlayed").value(1))
+                .andExpect(jsonPath("$.stats.wins").value(1));
+
+        matchRequest.put("matchNo", 2);
+        matchRequest.put("scheduledAt", "2026-07-01T11:00:00+09:00");
+        JsonNode defaultLossMatch = postAdmin("/api/admin/tournaments/" + tournamentId + "/matches", matchRequest);
+
+        mockMvc.perform(post("/api/scoring/matches/" + defaultLossMatch.get("id").asText() + "/finish-special")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", defaultLossMatch.get("version").asInt(),
+                                "reason", "DEFAULT_LOSS",
+                                "winnerSide", "PLAYER2",
+                                "note", "지각 몰수패"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WALKOVER"))
+                .andExpect(jsonPath("$.endReason").value("DEFAULT_LOSS"))
+                .andExpect(jsonPath("$.winnerTournamentPlayerId").value(player2.get("id").asText()))
+                .andExpect(jsonPath("$.sets", hasSize(2)))
+                .andExpect(jsonPath("$.sets[0].player1Score").value(0))
+                .andExpect(jsonPath("$.sets[0].player2Score").value(11));
+
+        matchRequest.put("matchNo", 3);
+        matchRequest.put("scheduledAt", "2026-07-01T12:00:00+09:00");
+        JsonNode byeMatch = postAdmin("/api/admin/tournaments/" + tournamentId + "/matches", matchRequest);
+
+        mockMvc.perform(post("/api/scoring/matches/" + byeMatch.get("id").asText() + "/finish-special")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", byeMatch.get("version").asInt(),
+                                "reason", "BYE",
+                                "winnerSide", "PLAYER1",
+                                "note", "대진표 부전승"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WALKOVER"))
+                .andExpect(jsonPath("$.endReason").value("BYE"))
+                .andExpect(jsonPath("$.sets", hasSize(0)));
+
+        mockMvc.perform(post("/api/scoring/matches/" + byeMatch.get("id").asText() + "/finish-special")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", 1,
+                                "reason", "DEFAULT_LOSS",
+                                "winnerSide", "PLAYER2"
+                        ))))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/public/tournaments/" + tournamentCode + "/rankings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].rankNo").value(1))
+                .andExpect(jsonPath("$[0].matchesPlayed").value(2));
+
+        mockMvc.perform(get("/api/admin/tournaments/" + tournamentId + "/audit-logs")
+                        .with(httpBasic(ADMIN_USER, ADMIN_PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[0].action").value("SPECIAL_RESULT_CONFIRMED"));
+
         mockMvc.perform(get("/api/public/tournaments/" + tournamentCode + "/matches"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].status").value("COMPLETED"))
                 .andExpect(jsonPath("$[0].courtName").value("Court 1"))
                 .andExpect(jsonPath("$[0].refereeNames", hasSize(2)))

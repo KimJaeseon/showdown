@@ -14,6 +14,7 @@ import com.showdown.backend.api.ApiConflictException;
 import com.showdown.backend.domain.AppUser;
 import com.showdown.backend.domain.Division;
 import com.showdown.backend.domain.Match;
+import com.showdown.backend.domain.MatchEndReason;
 import com.showdown.backend.domain.MatchSet;
 import com.showdown.backend.domain.MatchSide;
 import com.showdown.backend.domain.MatchStatus;
@@ -38,7 +39,9 @@ import com.showdown.backend.repository.TournamentPlayerRepository;
 import com.showdown.backend.repository.TournamentRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -62,6 +65,8 @@ public class TournamentAdminService {
     private final AppUserRepository users;
     private final RoleRepository roles;
     private final PasswordEncoder passwordEncoder;
+    private final RankingService rankingService;
+    private final AuditLogService auditLogService;
 
     public TournamentAdminService(
             TournamentRepository tournaments,
@@ -76,7 +81,9 @@ public class TournamentAdminService {
             MatchOfficialRepository matchOfficials,
             AppUserRepository users,
             RoleRepository roles,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            RankingService rankingService,
+            AuditLogService auditLogService
     ) {
         this.tournaments = tournaments;
         this.divisions = divisions;
@@ -91,6 +98,8 @@ public class TournamentAdminService {
         this.users = users;
         this.roles = roles;
         this.passwordEncoder = passwordEncoder;
+        this.rankingService = rankingService;
+        this.auditLogService = auditLogService;
     }
 
     public Tournament createTournament(TournamentRequest request) {
@@ -101,6 +110,12 @@ public class TournamentAdminService {
 
     public Tournament updateTournament(UUID id, TournamentRequest request) {
         Tournament tournament = getTournament(id);
+        if (request.status().ordinal() < tournament.getStatus().ordinal()) {
+            throw new IllegalArgumentException("대회 상태를 역방향으로 변경하려면 별도의 재개방 절차가 필요합니다.");
+        }
+        if (request.status().ordinal() > tournament.getStatus().ordinal() + 1) {
+            throw new IllegalArgumentException("대회 상태는 한 단계씩 변경해야 합니다.");
+        }
         applyTournament(tournament, request);
         return tournament;
     }
@@ -144,8 +159,10 @@ public class TournamentAdminService {
 
     public TournamentPlayer updateTournamentPlayer(UUID id, TournamentPlayerRequest request) {
         TournamentPlayer entry = getTournamentPlayer(id);
+        Division nextDivision = getDivision(request.divisionId());
+        requireSameTournament(entry.getTournament(), nextDivision.getTournament(), "부문");
         applyPlayer(entry.getPlayer(), request);
-        entry.setDivision(getDivision(request.divisionId()));
+        entry.setDivision(nextDivision);
         applyTournamentPlayer(entry, request);
         return entry;
     }
@@ -183,6 +200,7 @@ public class TournamentAdminService {
 
     public Stage updateStage(UUID id, StageRequest request) {
         Stage stage = stages.findById(id).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        requireSameTournament(stage.getTournament(), getDivision(request.divisionId()).getTournament(), "부문");
         applyStage(stage, request);
         return stage;
     }
@@ -208,6 +226,11 @@ public class TournamentAdminService {
 
     public TournamentGroup updateGroup(UUID id, GroupRequest request) {
         TournamentGroup group = getGroup(id);
+        Division division = getDivision(request.divisionId());
+        Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        requireSameTournament(group.getTournament(), division.getTournament(), "부문");
+        requireSameTournament(group.getTournament(), stage.getTournament(), "단계");
+        if (!stage.getDivision().getId().equals(division.getId())) throw new IllegalArgumentException("단계와 조의 부문이 일치하지 않습니다.");
         applyGroup(group, request);
         return group;
     }
@@ -226,6 +249,7 @@ public class TournamentAdminService {
 
     public Match updateMatch(UUID id, MatchRequest request) {
         Match match = getMatch(id);
+        validateMatchReferences(match.getTournament(), request);
         applyMatch(match, request);
         return match;
     }
@@ -235,14 +259,21 @@ public class TournamentAdminService {
     }
 
     public Match updateMatchSets(UUID matchId, MatchSetsUpdateRequest request) {
+        Match match = saveMatchSetDraft(matchId, request);
+        return completeMatch(match, request.changeReason());
+    }
+
+    public Match saveMatchSetDraft(UUID matchId, MatchSetsUpdateRequest request) {
         Match match = getMatch(matchId);
+        Map<String, Object> before = scoreState(match);
         if (!match.getVersion().equals(request.version())) {
             throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
         }
-        if (request.sets() == null || request.sets().isEmpty()) {
-            throw new IllegalArgumentException("세트 점수는 최소 1개 이상이어야 합니다.");
+        requireChangeReasonForResultEdit(match, request.changeReason());
+        if (request.sets() == null) {
+            throw new IllegalArgumentException("세트 점수 목록이 필요합니다.");
         }
-
+        validateSetScores(request.sets(), match.getMaxSets());
         matchSets.deleteByMatchId(matchId);
         int player1Sets = 0;
         int player2Sets = 0;
@@ -250,9 +281,6 @@ public class TournamentAdminService {
         int player2Points = 0;
 
         for (MatchSetRequest setRequest : request.sets()) {
-            if (setRequest.player1Score().equals(setRequest.player2Score())) {
-                throw new IllegalArgumentException(setRequest.setNo() + "세트는 동점일 수 없습니다.");
-            }
             MatchSet set = new MatchSet();
             set.setMatch(match);
             set.setSetNo(setRequest.setNo());
@@ -270,17 +298,167 @@ public class TournamentAdminService {
             }
         }
 
-        if (player1Sets == player2Sets) {
-            throw new IllegalArgumentException("전체 세트 승수가 동률입니다.");
-        }
-
         match.setPlayer1SetsWon(player1Sets);
         match.setPlayer2SetsWon(player2Sets);
         match.setPlayer1TotalPoints(player1Points);
         match.setPlayer2TotalPoints(player2Points);
-        match.setWinner(player1Sets > player2Sets ? match.getPlayer1() : match.getPlayer2());
-        match.setStatus(MatchStatus.COMPLETED);
+        match.setWinner(null);
+        match.setStatus(MatchStatus.RUNNING);
+        match.setEndReason(MatchEndReason.NORMAL);
+        match.setResultNote(cleanNote(request.changeReason()));
+        matches.flush();
+        auditLogService.record(match.getTournament(), "SCORE_DRAFT_SAVED", "match", match.getId(), before, scoreState(match));
         return match;
+    }
+
+    public Match confirmMatchResult(UUID matchId, Integer version, String changeReason) {
+        Match match = getMatch(matchId);
+        if (!match.getVersion().equals(version)) {
+            throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
+        }
+        requireChangeReasonForResultEdit(match, changeReason);
+        return completeMatch(match, changeReason);
+    }
+
+    public Match finishMatchSpecial(UUID matchId, Integer version, MatchEndReason reason, MatchSide winnerSide, String note) {
+        if (reason == null || reason == MatchEndReason.NORMAL) {
+            throw new IllegalArgumentException("특수 종료 사유는 기권, 몰수패 또는 BYE여야 합니다.");
+        }
+        if (winnerSide == null) {
+            throw new IllegalArgumentException("특수 종료 승자를 선택해야 합니다.");
+        }
+        Match match = getMatch(matchId);
+        if (!match.getVersion().equals(version)) {
+            throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
+        }
+        requireChangeReasonForResultEdit(match, note);
+        Map<String, Object> before = scoreState(match);
+        matchSets.deleteByMatchId(matchId);
+        match.setWinner(winnerSide == MatchSide.PLAYER1 ? match.getPlayer1() : match.getPlayer2());
+        match.setStatus(MatchStatus.WALKOVER);
+        match.setEndReason(reason);
+        match.setResultNote(cleanNote(note));
+        resetScore(match);
+
+        if (reason != MatchEndReason.BYE) {
+            int neededWins = match.getMaxSets() / 2 + 1;
+            for (int setNo = 1; setNo <= neededWins; setNo++) {
+                createSyntheticSet(match, setNo, winnerSide);
+            }
+            applyScoreFromSets(match);
+        }
+
+        matches.flush();
+        if (match.getGroup() != null) {
+            rankingService.recalculate(match.getGroup());
+        }
+        auditLogService.record(match.getTournament(), "SPECIAL_RESULT_CONFIRMED", "match", match.getId(), before, scoreState(match));
+        return match;
+    }
+
+    private Match completeMatch(Match match, String changeReason) {
+        List<MatchSet> sets = getMatchSets(match.getId());
+        if (sets.isEmpty()) {
+            throw new IllegalArgumentException("확정할 세트 점수가 없습니다.");
+        }
+        int neededWins = match.getMaxSets() / 2 + 1;
+        if (match.getPlayer1SetsWon() != neededWins && match.getPlayer2SetsWon() != neededWins) {
+            throw new IllegalArgumentException(match.getMaxSets() + "세트제 경기의 승리 조건을 충족하지 못했습니다.");
+        }
+        match.setWinner(match.getPlayer1SetsWon() > match.getPlayer2SetsWon() ? match.getPlayer1() : match.getPlayer2());
+        match.setStatus(MatchStatus.COMPLETED);
+        match.setEndReason(MatchEndReason.NORMAL);
+        match.setResultNote(cleanNote(changeReason));
+        if (match.getGroup() != null) {
+            rankingService.recalculate(match.getGroup());
+        }
+        auditLogService.record(match.getTournament(), "RESULT_CONFIRMED", "match", match.getId(),
+                Map.of("status", MatchStatus.RUNNING.name()), scoreState(match));
+        return match;
+    }
+
+    private Map<String, Object> scoreState(Match match) {
+        Map<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("status", match.getStatus().name());
+        state.put("player1SetsWon", match.getPlayer1SetsWon()); state.put("player2SetsWon", match.getPlayer2SetsWon());
+        state.put("player1TotalPoints", match.getPlayer1TotalPoints()); state.put("player2TotalPoints", match.getPlayer2TotalPoints());
+        state.put("winnerTournamentPlayerId", match.getWinner() == null ? null : match.getWinner().getId().toString());
+        state.put("endReason", match.getEndReason().name());
+        state.put("resultNote", match.getResultNote());
+        return state;
+    }
+
+    private void createSyntheticSet(Match match, int setNo, MatchSide winnerSide) {
+        MatchSet set = new MatchSet();
+        set.setMatch(match);
+        set.setSetNo(setNo);
+        set.setPlayer1Score(winnerSide == MatchSide.PLAYER1 ? 11 : 0);
+        set.setPlayer2Score(winnerSide == MatchSide.PLAYER2 ? 11 : 0);
+        set.setWinnerSide(winnerSide);
+        matchSets.save(set);
+    }
+
+    private void applyScoreFromSets(Match match) {
+        int player1Sets = 0;
+        int player2Sets = 0;
+        int player1Points = 0;
+        int player2Points = 0;
+        for (MatchSet set : getMatchSets(match.getId())) {
+            player1Points += set.getPlayer1Score();
+            player2Points += set.getPlayer2Score();
+            if (set.getWinnerSide() == MatchSide.PLAYER1) player1Sets++;
+            if (set.getWinnerSide() == MatchSide.PLAYER2) player2Sets++;
+        }
+        match.setPlayer1SetsWon(player1Sets);
+        match.setPlayer2SetsWon(player2Sets);
+        match.setPlayer1TotalPoints(player1Points);
+        match.setPlayer2TotalPoints(player2Points);
+    }
+
+    private void resetScore(Match match) {
+        match.setPlayer1SetsWon(0);
+        match.setPlayer2SetsWon(0);
+        match.setPlayer1TotalPoints(0);
+        match.setPlayer2TotalPoints(0);
+    }
+
+    private void requireChangeReasonForResultEdit(Match match, String changeReason) {
+        boolean alreadyFinal = match.getStatus() == MatchStatus.COMPLETED || match.getStatus() == MatchStatus.WALKOVER;
+        if (alreadyFinal && (changeReason == null || changeReason.isBlank())) {
+            throw new IllegalArgumentException("확정된 경기 결과를 수정하려면 변경 사유가 필요합니다.");
+        }
+    }
+
+    private String cleanNote(String note) {
+        return note == null || note.isBlank() ? null : note.trim();
+    }
+
+    private void validateSetScores(List<MatchSetRequest> sets, int maxSets) {
+        if (sets.size() > maxSets) {
+            throw new IllegalArgumentException(maxSets + "세트제 경기의 최대 세트 수를 초과했습니다.");
+        }
+        int neededWins = maxSets / 2 + 1;
+        Set<Integer> numbers = new HashSet<>();
+        int player1Wins = 0;
+        int player2Wins = 0;
+        for (int i = 0; i < sets.size(); i++) {
+            MatchSetRequest set = sets.get(i);
+            if (set.setNo() == null || set.setNo() != i + 1 || !numbers.add(set.setNo())) {
+                throw new IllegalArgumentException("세트 번호는 1부터 중복 없이 연속되어야 합니다.");
+            }
+            if (set.player1Score() < 0 || set.player2Score() < 0 || set.player1Score().equals(set.player2Score())) {
+                throw new IllegalArgumentException(set.setNo() + "세트 점수는 음수 또는 동점일 수 없습니다.");
+            }
+            int winner = Math.max(set.player1Score(), set.player2Score());
+            int loser = Math.min(set.player1Score(), set.player2Score());
+            if (winner < 11 || winner - loser < 2) {
+                throw new IllegalArgumentException(set.setNo() + "세트는 최소 11점과 2점 차가 필요합니다.");
+            }
+            if (set.player1Score() > set.player2Score()) player1Wins++; else player2Wins++;
+            if ((player1Wins == neededWins || player2Wins == neededWins) && i < sets.size() - 1) {
+                throw new IllegalArgumentException("경기 승리 조건을 충족한 뒤 추가 세트를 입력할 수 없습니다.");
+            }
+        }
     }
 
     public AppUser createUser(UserRequest request) {
@@ -395,12 +573,19 @@ public class TournamentAdminService {
         match.setScheduledAt(request.scheduledAt());
         match.setCourtName(request.courtName());
         match.setDurationMinutes(request.durationMinutes() == null ? 30 : request.durationMinutes());
+        int maxSets = request.maxSets() == null ? 3 : request.maxSets();
+        if (maxSets != 1 && maxSets != 3 && maxSets != 5) throw new IllegalArgumentException("경기 형식은 1·3·5세트제만 지원합니다.");
+        match.setMaxSets(maxSets);
         match.setPlayer1(getTournamentPlayer(request.player1TournamentPlayerId()));
         match.setPlayer2(getTournamentPlayer(request.player2TournamentPlayerId()));
         if (request.player1TournamentPlayerId().equals(request.player2TournamentPlayerId())) {
             throw new IllegalArgumentException("같은 선수를 경기 양쪽에 배정할 수 없습니다.");
         }
         match.setStatus(request.status() == null ? MatchStatus.SCHEDULED : request.status());
+        if (match.getStatus() != MatchStatus.WALKOVER) {
+            match.setEndReason(MatchEndReason.NORMAL);
+            match.setResultNote(null);
+        }
         List<Official> assignedOfficials = resolveAssignedOfficials(match.getTournament(), request.refereeOfficialIds());
         validateScheduleConflicts(match, assignedOfficials);
         match.replaceOfficials(assignedOfficials);
@@ -431,6 +616,10 @@ public class TournamentAdminService {
         }
         OffsetDateTime targetStart = target.getScheduledAt();
         OffsetDateTime targetEnd = targetStart.plusMinutes(target.getDurationMinutes() == null ? 30 : target.getDurationMinutes());
+        var localDate = targetStart.atZoneSameInstant(ZoneId.of(target.getTournament().getTimezone())).toLocalDate();
+        if (localDate.isBefore(target.getTournament().getStartDate()) || localDate.isAfter(target.getTournament().getEndDate())) {
+            throw new IllegalArgumentException("경기 시각은 대회 기간 안이어야 합니다.");
+        }
         Set<UUID> officialIds = assignedOfficials.stream().map(Official::getId).collect(java.util.stream.Collectors.toSet());
 
         for (Match existing : matches.findByTournamentIdAndScheduledAtIsNotNullOrderByScheduledAtAscMatchNoAsc(target.getTournament().getId())) {
@@ -453,6 +642,10 @@ public class TournamentAdminService {
             if (hasOfficialConflict) {
                 throw new IllegalArgumentException("같은 시간대에 동일 심판을 중복 배정할 수 없습니다.");
             }
+            Set<UUID> targetPlayers = Set.of(target.getPlayer1().getId(), target.getPlayer2().getId());
+            if (targetPlayers.contains(existing.getPlayer1().getId()) || targetPlayers.contains(existing.getPlayer2().getId())) {
+                throw new IllegalArgumentException("같은 시간대에 동일 선수를 중복 배정할 수 없습니다.");
+            }
         }
     }
 
@@ -465,6 +658,10 @@ public class TournamentAdminService {
         Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
         TournamentPlayer player1 = getTournamentPlayer(request.player1TournamentPlayerId());
         TournamentPlayer player2 = getTournamentPlayer(request.player2TournamentPlayerId());
+        if (player1.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE
+                || player2.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE) {
+            throw new IllegalArgumentException("기권 또는 실격 선수는 경기에 배정할 수 없습니다.");
+        }
         requireSameTournament(tournament, division.getTournament(), "부문");
         requireSameTournament(tournament, stage.getTournament(), "단계");
         requireSameTournament(tournament, player1.getTournament(), "선수 1");
@@ -493,6 +690,7 @@ public class TournamentAdminService {
         user.setEmail(request.email());
         user.setDisplayName(request.displayName());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setTournamentPlayer(request.tournamentPlayerId() == null ? null : getTournamentPlayer(request.tournamentPlayerId()));
         Role role = roles.findByCode(request.role().getRoleCode())
                 .orElseThrow(() -> new EntityNotFoundException("역할을 찾을 수 없습니다: " + request.role().getRoleCode()));
         user.replaceGlobalRole(role);

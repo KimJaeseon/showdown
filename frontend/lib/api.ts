@@ -3,11 +3,13 @@ import type {
   DivisionCategory,
   Group,
   Match,
+  MatchEndReason,
   MatchSet,
   MatchSide,
   MatchStatus,
   Official,
   Player,
+  PlayerPortal,
   RankingSnapshot,
   ScoreSetInput,
   Stage,
@@ -118,6 +120,9 @@ interface BackendMatch {
   scheduledAt?: string;
   courtName?: string;
   refereeName?: string;
+  refereeOfficialIds?: string[];
+  durationMinutes?: number;
+  maxSets?: number;
   player1TournamentPlayerId: string;
   player1Name: string;
   player2TournamentPlayerId: string;
@@ -129,7 +134,17 @@ interface BackendMatch {
   player1TotalPoints: number;
   player2TotalPoints: number;
   version: number;
+  endReason?: string;
+  resultNote?: string;
   sets: BackendMatchSet[];
+}
+
+interface BackendPlayerPortal {
+  player: BackendTournamentPlayer;
+  nextMatch?: BackendMatch;
+  scheduledMatches: BackendMatch[];
+  completedMatches: BackendMatch[];
+  stats: PlayerPortal["stats"];
 }
 
 export interface TournamentRequest {
@@ -193,15 +208,37 @@ export interface MatchRequest {
   scheduledAt?: string;
   courtName?: string;
   refereeName?: string;
+  refereeOfficialIds?: string[];
+  durationMinutes?: number;
+  maxSets?: 1 | 3 | 5;
   player1TournamentPlayerId: string;
   player2TournamentPlayerId: string;
   status?: "SCHEDULED" | "RUNNING" | "COMPLETED" | "CANCELLED" | "WALKOVER";
+}
+
+export interface GroupMemberResponse {
+  id: string;
+  groupId: string;
+  tournamentPlayerId: string;
+  playerName: string;
+  slotNo: number;
+  sourceRule?: string;
+}
+
+export interface RoundRobinPreview {
+  expectedMatchCount: number;
+  createdMatchCount: number;
+  matches: Array<{ player1Id: string; player1Name: string; player2Id: string; player2Name: string }>;
 }
 
 export function authHeader(auth: BasicAuthSession) {
   // 백엔드는 현재 Basic Auth를 사용한다. 인증 정보는 sessionStorage에만 두고,
   // 실제 요청 직전에 Authorization 헤더로 변환한다.
   return `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+}
+
+export async function verifyAuth(auth: BasicAuthSession) {
+  return request<{ username: string; authorities: string[] }>("/api/auth/me", { headers: withAuth(auth) });
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -236,12 +273,13 @@ function withAuth(auth: BasicAuthSession): HeadersInit {
 
 export async function getPublicTournament(tournamentCode: string) {
   try {
-    const [tournament, divisions, tournamentPlayers, groups, matches] = await Promise.all([
+    const [tournament, divisions, tournamentPlayers, groups, matches, rankings] = await Promise.all([
       request<BackendTournament>(`/api/public/tournaments/${tournamentCode}`),
       request<BackendDivision[]>(`/api/public/tournaments/${tournamentCode}/divisions`),
       request<BackendTournamentPlayer[]>(`/api/public/tournaments/${tournamentCode}/players`),
       request<BackendGroup[]>(`/api/public/tournaments/${tournamentCode}/groups`),
       request<BackendMatch[]>(`/api/public/tournaments/${tournamentCode}/matches`),
+      request<RankingSnapshot[]>(`/api/public/tournaments/${tournamentCode}/rankings`),
     ]);
 
     return toDataset({
@@ -252,7 +290,7 @@ export async function getPublicTournament(tournamentCode: string) {
       stages: inferStages(groups, matches),
       groups,
       matches,
-      rankings: [],
+      rankings,
     });
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
@@ -270,13 +308,14 @@ export async function getAdminDataset(auth: BasicAuthSession, tournamentId?: str
     return emptyDataset();
   }
 
-  const [divisions, tournamentPlayers, officials, stages, groups, matches] = await Promise.all([
+  const [divisions, tournamentPlayers, officials, stages, groups, matches, rankings] = await Promise.all([
     request<BackendDivision[]>(`/api/admin/tournaments/${tournament.id}/divisions`, { headers: withAuth(auth) }),
     request<BackendTournamentPlayer[]>(`/api/admin/tournaments/${tournament.id}/players`, { headers: withAuth(auth) }),
     request<BackendOfficial[]>(`/api/admin/tournaments/${tournament.id}/officials`, { headers: withAuth(auth) }),
     request<BackendStage[]>(`/api/admin/tournaments/${tournament.id}/stages`, { headers: withAuth(auth) }),
     request<BackendGroup[]>(`/api/admin/tournaments/${tournament.id}/groups`, { headers: withAuth(auth) }),
     request<BackendMatch[]>(`/api/admin/tournaments/${tournament.id}/matches`, { headers: withAuth(auth) }),
+    request<RankingSnapshot[]>(`/api/public/tournaments/${tournament.code}/rankings`),
   ]);
 
   return toDataset({
@@ -287,7 +326,7 @@ export async function getAdminDataset(auth: BasicAuthSession, tournamentId?: str
     stages,
     groups,
     matches,
-    rankings: [],
+    rankings,
   });
 }
 
@@ -407,6 +446,32 @@ export async function deleteGroup(auth: BasicAuthSession, groupId: string) {
   await request<void>(`/api/admin/groups/${groupId}`, { method: "DELETE", headers: withAuth(auth) });
 }
 
+export async function getGroupMembers(auth: BasicAuthSession, groupId: string) {
+  return request<GroupMemberResponse[]>(`/api/admin/groups/${groupId}/members`, { headers: withAuth(auth) });
+}
+
+export async function addGroupMember(auth: BasicAuthSession, groupId: string, tournamentPlayerId: string, slotNo: number) {
+  return request<GroupMemberResponse>(`/api/admin/groups/${groupId}/members`, {
+    method: "POST", headers: withAuth(auth), body: JSON.stringify({ tournamentPlayerId, slotNo }),
+  });
+}
+
+export async function removeGroupMember(auth: BasicAuthSession, groupId: string, memberId: string) {
+  await request<void>(`/api/admin/groups/${groupId}/members/${memberId}`, { method: "DELETE", headers: withAuth(auth) });
+}
+
+export async function previewRoundRobin(auth: BasicAuthSession, groupId: string) {
+  return request<RoundRobinPreview>(`/api/admin/groups/${groupId}/round-robin/preview`, { headers: withAuth(auth) });
+}
+
+export async function generateRoundRobin(auth: BasicAuthSession, groupId: string, body: {
+  startAt: string; matchDurationMinutes: number; courtNames: string[]; officialIds: string[];
+}) {
+  return request<RoundRobinPreview>(`/api/admin/groups/${groupId}/round-robin`, {
+    method: "POST", headers: withAuth(auth), body: JSON.stringify(body),
+  });
+}
+
 export async function createMatch(auth: BasicAuthSession, tournamentId: string, body: MatchRequest) {
   return mapMatch(await request<BackendMatch>(`/api/admin/tournaments/${tournamentId}/matches`, {
     method: "POST",
@@ -433,6 +498,45 @@ export async function saveMatchSets(auth: BasicAuthSession, matchId: string, set
     headers: withAuth(auth),
     body: JSON.stringify({ version, sets }),
   }));
+}
+
+export async function saveMatchSetDraft(auth: BasicAuthSession, matchId: string, sets: ScoreSetInput[], version: number) {
+  return mapMatch(await request<BackendMatch>(`/api/scoring/matches/${matchId}/draft`, {
+    method: "PUT",
+    headers: withAuth(auth),
+    body: JSON.stringify({ version, sets }),
+  }));
+}
+
+export async function confirmMatchResult(auth: BasicAuthSession, matchId: string, version: number, changeReason?: string) {
+  return mapMatch(await request<BackendMatch>(`/api/scoring/matches/${matchId}/confirm`, {
+    method: "POST",
+    headers: withAuth(auth),
+    body: JSON.stringify({ version, changeReason }),
+  }));
+}
+
+export async function finishMatchSpecial(
+  auth: BasicAuthSession,
+  matchId: string,
+  body: { version: number; reason: "GIVING_UP" | "DEFAULT_LOSS" | "BYE"; winnerSide: "PLAYER1" | "PLAYER2"; note?: string },
+) {
+  return mapMatch(await request<BackendMatch>(`/api/scoring/matches/${matchId}/finish-special`, {
+    method: "POST",
+    headers: withAuth(auth),
+    body: JSON.stringify(body),
+  }));
+}
+
+export async function getPlayerPortal(auth: BasicAuthSession): Promise<PlayerPortal> {
+  const portal = await request<BackendPlayerPortal>("/api/player/me", { headers: withAuth(auth) });
+  return {
+    player: mapTournamentPlayer(portal.player),
+    nextMatch: portal.nextMatch ? mapMatch(portal.nextMatch) : undefined,
+    scheduledMatches: portal.scheduledMatches.map(mapMatch),
+    completedMatches: portal.completedMatches.map(mapMatch),
+    stats: portal.stats,
+  };
 }
 
 function toDataset(source: {
@@ -581,10 +685,14 @@ function mapMatch(item: BackendMatch): Match {
     groupId: item.groupId,
     matchNo: item.matchNo,
     scheduledAt: item.scheduledAt ?? new Date().toISOString(),
-    durationMinutes: 30,
+    durationMinutes: item.durationMinutes ?? 30,
     courtName: item.courtName ?? "미정",
     refereeName: item.refereeName,
+    refereeOfficialIds: item.refereeOfficialIds,
+    maxSets: (item.maxSets ?? 3) as 1 | 3 | 5,
     status: lowerEnum<MatchStatus>(item.status),
+    endReason: lowerEnum<MatchEndReason>(item.endReason ?? "NORMAL"),
+    resultNote: item.resultNote,
     player1TournamentPlayerId: item.player1TournamentPlayerId,
     player2TournamentPlayerId: item.player2TournamentPlayerId,
     winnerTournamentPlayerId: item.winnerTournamentPlayerId,

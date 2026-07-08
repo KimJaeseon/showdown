@@ -6,6 +6,7 @@ import com.showdown.backend.api.dto.MatchDtos.MatchResponse;
 import com.showdown.backend.api.dto.MatchDtos.MatchSetResponse;
 import com.showdown.backend.api.dto.OfficialDtos.OfficialResponse;
 import com.showdown.backend.api.dto.PlayerDtos.TournamentPlayerResponse;
+import com.showdown.backend.api.dto.RankingDtos.RankingResponse;
 import com.showdown.backend.api.dto.StageDtos.StageResponse;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentResponse;
 import com.showdown.backend.api.dto.UserDtos.UserResponse;
@@ -16,6 +17,7 @@ import com.showdown.backend.domain.MatchOfficial;
 import com.showdown.backend.domain.MatchSet;
 import com.showdown.backend.domain.Official;
 import com.showdown.backend.domain.Player;
+import com.showdown.backend.domain.RankingSnapshot;
 import com.showdown.backend.domain.Stage;
 import com.showdown.backend.domain.Tournament;
 import com.showdown.backend.domain.TournamentGroup;
@@ -117,6 +119,7 @@ public final class ApiMapper {
                 match.getScheduledAt(),
                 match.getCourtName(),
                 match.getDurationMinutes(),
+                match.getMaxSets(),
                 refereeNames(match).isEmpty() ? null : String.join(", ", refereeNames(match)),
                 match.getMatchOfficials().stream()
                         .map(MatchOfficial::getOfficial)
@@ -129,6 +132,8 @@ public final class ApiMapper {
                 player2 == null ? null : displayName(player2),
                 match.getWinner() == null ? null : match.getWinner().getId(),
                 match.getStatus(),
+                match.getEndReason(),
+                match.getResultNote(),
                 match.getPlayer1SetsWon(),
                 match.getPlayer2SetsWon(),
                 match.getPlayer1TotalPoints(),
@@ -154,8 +159,19 @@ public final class ApiMapper {
                 user.getEmail(),
                 user.getDisplayName(),
                 user.getRole(),
+                user.getTournamentPlayer() == null ? null : user.getTournamentPlayer().getId(),
                 user.getActive()
         );
+    }
+
+    public static RankingResponse toRankingResponse(RankingSnapshot ranking) {
+        return new RankingResponse(ranking.getId(), ranking.getTournament().getId(), ranking.getDivision().getId(),
+                ranking.getStage() == null ? null : ranking.getStage().getId(),
+                ranking.getGroup() == null ? null : ranking.getGroup().getId(), ranking.getTournamentPlayer().getId(),
+                ranking.getRankNo(), ranking.getMatchesPlayed(), ranking.getWins(), ranking.getLosses(),
+                ranking.getMatchPoints(), ranking.getSetsWon(), ranking.getSetsLost(), ranking.getSetDifference(),
+                ranking.getPointsFor(), ranking.getPointsAgainst(), ranking.getPointDifference(),
+                ranking.getTieBreakNote(), ranking.getCalculatedAt());
     }
 
     private static String displayName(TournamentPlayer entry) {

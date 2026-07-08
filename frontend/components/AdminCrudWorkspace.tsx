@@ -11,6 +11,7 @@ import {
   createStage,
   createTournament,
   createTournamentPlayer,
+  addGroupMember,
   deleteDivision,
   deleteGroup,
   deleteMatch,
@@ -18,6 +19,10 @@ import {
   deleteStage,
   deleteTournamentPlayer,
   getAdminDataset,
+  getGroupMembers,
+  generateRoundRobin,
+  previewRoundRobin,
+  removeGroupMember,
   updateGroup,
   updateMatch,
   updateOfficial,
@@ -27,6 +32,8 @@ import {
   type BasicAuthSession,
   type DivisionRequest,
   type GroupRequest,
+  type GroupMemberResponse,
+  type RoundRobinPreview,
   type MatchRequest,
   type OfficialRequest,
   type StageRequest,
@@ -407,6 +414,17 @@ function GroupsPanel({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<GroupRequest>(emptyGroupRequest(dataset));
+  const [selectedGroupId, setSelectedGroupId] = useState(dataset.groups[0]?.id ?? "");
+  const [selectedPlayerId, setSelectedPlayerId] = useState(dataset.tournamentPlayers[0]?.id ?? "");
+  const [slotNo, setSlotNo] = useState(1);
+  const [members, setMembers] = useState<GroupMemberResponse[]>([]);
+  const [preview, setPreview] = useState<RoundRobinPreview | null>(null);
+
+  async function loadMembers(groupId = selectedGroupId) {
+    if (!groupId) return;
+    setMembers(await getGroupMembers(auth, groupId));
+    setPreview(null);
+  }
 
   if (dataset.stages.length === 0 || dataset.divisions.length === 0) {
     return <EmptyState title="조 생성 전 단계가 필요합니다" description="먼저 백엔드 Swagger 또는 단계 API로 단계와 부문을 생성하세요." />;
@@ -432,6 +450,7 @@ function GroupsPanel({
         />
       }
       list={
+        <>
         <SimpleTable
           caption="조 목록"
           headers={["이름", "코드", "부문", "작업"]}
@@ -464,6 +483,34 @@ function GroupsPanel({
             </div>,
           ])}
         />
+        <section className="panel" aria-labelledby="group-member-title">
+          <h3 id="group-member-title">조 구성원 배정</h3>
+          <div className="form-grid">
+            <label className="field"><span>조</span><select value={selectedGroupId} onChange={(event) => { setSelectedGroupId(event.target.value); void loadMembers(event.target.value); }}>
+              {dataset.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select></label>
+            <label className="field"><span>선수</span><select value={selectedPlayerId} onChange={(event) => setSelectedPlayerId(event.target.value)}>
+              {dataset.tournamentPlayers.map((player) => <option key={player.id} value={player.id}>{getPlayerName(player.id, dataset.tournamentPlayers, dataset.players)}</option>)}
+            </select></label>
+            <label className="field"><span>슬롯</span><input type="number" min="1" value={slotNo} onChange={(event) => setSlotNo(Number(event.target.value))} /></label>
+          </div>
+          <div className="toolbar">
+            <button type="button" onClick={async () => { await addGroupMember(auth, selectedGroupId, selectedPlayerId, slotNo); await loadMembers(); onMessage("선수를 조에 배정했습니다."); }}>선수 배정</button>
+            <button className="secondary" type="button" onClick={() => loadMembers()}>구성원 조회</button>
+            <button className="secondary" type="button" onClick={async () => setPreview(await previewRoundRobin(auth, selectedGroupId))}>대진 미리보기</button>
+            <button type="button" disabled={!preview || dataset.officials.length < 2} onClick={async () => {
+              const result = await generateRoundRobin(auth, selectedGroupId, {
+                startAt: `${dataset.tournament.startDate}T09:00:00+09:00`, matchDurationMinutes: 30, courtNames: ["1"],
+                officialIds: dataset.officials.map((official) => official.id),
+              });
+              onMessage(`라운드로빈 ${result.createdMatchCount}경기를 생성했습니다.`);
+              await onReload();
+            }}>미리보기대로 생성</button>
+          </div>
+          {members.length ? <ul>{members.map((member) => <li key={member.id}>{member.slotNo}번 {member.playerName} <button className="secondary" type="button" onClick={async () => { await removeGroupMember(auth, selectedGroupId, member.id); await loadMembers(); }}>배정 해제</button></li>)}</ul> : <p>구성원 조회 버튼을 눌러 현재 배정을 확인하세요.</p>}
+          {preview ? <p aria-live="polite">예상 경기 수: {preview.expectedMatchCount}경기 ({preview.matches.map((match) => `${match.player1Name} 대 ${match.player2Name}`).join(", ")})</p> : null}
+        </section>
+        </>
       }
     />
   );
@@ -844,6 +891,10 @@ function MatchForm({ dataset, draft, submitLabel, onChange, onSubmit }: {
       <label className="field"><span>그룹</span><select value={draft.groupId ?? ""} onChange={(event) => onChange({ ...draft, groupId: event.target.value || undefined })}><option value="">미지정</option>{dataset.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
       <label className="field"><span>시작 시각</span><input type="datetime-local" value={(draft.scheduledAt ?? "").slice(0, 16)} onChange={(event) => onChange({ ...draft, scheduledAt: `${event.target.value}:00+09:00` })} /></label>
       <label className="field"><span>테이블</span><input value={draft.courtName ?? ""} onChange={(event) => onChange({ ...draft, courtName: event.target.value })} /></label>
+      <label className="field"><span>경기 시간(분)</span><input type="number" min="1" value={draft.durationMinutes ?? 30} onChange={(event) => onChange({ ...draft, durationMinutes: Number(event.target.value) })} /></label>
+      <label className="field"><span>경기 형식</span><select value={draft.maxSets ?? 3} onChange={(event) => onChange({ ...draft, maxSets: Number(event.target.value) as 1 | 3 | 5 })}><option value="1">1세트제</option><option value="3">3세트제</option><option value="5">5세트제</option></select></label>
+      <label className="field"><span>심판 1</span><select value={draft.refereeOfficialIds?.[0] ?? ""} onChange={(event) => onChange({ ...draft, refereeOfficialIds: [event.target.value, draft.refereeOfficialIds?.[1] ?? ""] })}>{dataset.officials.map((official) => <option key={official.id} value={official.id}>{official.name}</option>)}</select></label>
+      <label className="field"><span>심판 2</span><select value={draft.refereeOfficialIds?.[1] ?? ""} onChange={(event) => onChange({ ...draft, refereeOfficialIds: [draft.refereeOfficialIds?.[0] ?? "", event.target.value] })}>{dataset.officials.map((official) => <option key={official.id} value={official.id}>{official.name}</option>)}</select></label>
       <label className="field"><span>선수 1</span><select value={draft.player1TournamentPlayerId} onChange={(event) => onChange({ ...draft, player1TournamentPlayerId: event.target.value })}>{dataset.tournamentPlayers.map((entry) => <option key={entry.id} value={entry.id}>{getPlayerName(entry.id, dataset.tournamentPlayers, dataset.players)}</option>)}</select></label>
       <label className="field"><span>선수 2</span><select value={draft.player2TournamentPlayerId} onChange={(event) => onChange({ ...draft, player2TournamentPlayerId: event.target.value })}>{dataset.tournamentPlayers.map((entry) => <option key={entry.id} value={entry.id}>{getPlayerName(entry.id, dataset.tournamentPlayers, dataset.players)}</option>)}</select></label>
       <button type="submit">{submitLabel}</button>
@@ -968,6 +1019,9 @@ function emptyMatchRequest(dataset: TournamentDataset): MatchRequest {
     matchNo: dataset.matches.length + 1,
     scheduledAt: new Date().toISOString(),
     courtName: "",
+    durationMinutes: 30,
+    maxSets: 3,
+    refereeOfficialIds: dataset.officials.slice(0, 2).map((official) => official.id),
     player1TournamentPlayerId: dataset.tournamentPlayers[0]?.id ?? "",
     player2TournamentPlayerId: dataset.tournamentPlayers[1]?.id ?? "",
     status: "SCHEDULED",
@@ -983,6 +1037,9 @@ function toMatchRequest(match: Match): MatchRequest {
     scheduledAt: match.scheduledAt,
     courtName: match.courtName,
     refereeName: match.refereeName,
+    refereeOfficialIds: match.refereeOfficialIds,
+    durationMinutes: match.durationMinutes,
+    maxSets: match.maxSets ?? 3,
     player1TournamentPlayerId: match.player1TournamentPlayerId,
     player2TournamentPlayerId: match.player2TournamentPlayerId,
     status: match.status.toUpperCase() as MatchRequest["status"],

@@ -92,6 +92,14 @@
 	</dependencies>
 
 	<build>
+		<resources>
+			<resource><directory>src/main/resources</directory></resource>
+			<resource>
+				<directory>../database/sql</directory>
+				<targetPath>db/migration</targetPath>
+				<includes><include>V*.sql</include></includes>
+			</resource>
+		</resources>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

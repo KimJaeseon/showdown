@@ -131,7 +131,14 @@ FR-07 심판 배정
 FR-08 점수 및 경기 상태
 - 경기 상태를 예정, 진행, 완료, 취소, 기권승으로 관리한다.
 - 세트 점수의 음수, 동점과 중복 세트 번호를 차단한다.
-- 종목별 승리 세트 수와 점수 규칙을 설정할 수 있어야 한다.
+- IBSA Showdown Rules 2022-2025의 개인전 규칙을 기준으로 1세트제, 3세트제와 5세트제를 지원한다.
+- 일반 세트는 최소 11점 및 2점 차로 승리하며 10대 10 이후 최고 점수 상한 없이 2점 차가 날 때까지 계속한다.
+- 경기 승리에 필요한 세트 수는 1세트제 1개, 3세트제 2개, 5세트제 3개로 한다.
+- 경기 포기(GIVING_UP)는 포기 선수의 확정 세트와 기득점을 유지하고 상대에게 경기를 끝내는 최소 결과를 부여한다.
+- 몰수패(DEFAULT_LOSS)는 패자의 기존 세트와 득점을 무효화하고 상대에게 필요한 모든 세트를 11대 0으로 부여한다.
+- 대진표상의 부전승(BYE)은 실제 경기로 집계하지 않으며 세트와 득점을 생성하지 않는다.
+- 경기 포기, 몰수패와 BYE는 별도의 종료 사유로 저장하고 결과 응답과 감사 로그에서 구분한다.
+- 시간제 경기, 팀전과 포인트 이벤트 단위 득점 기록은 MVP 후속 범위로 둔다.
 - 동시 수정 시 최신 데이터를 다시 조회하도록 409 Conflict를 반환한다.
 - 확정된 결과를 수정할 때 사유와 감사 로그를 남긴다.
 - 점수 저장, 경기 결과 확정과 순위 재계산의 트랜잭션 경계를 명확히 한다.
@@ -285,7 +292,7 @@ SQL 설계가 구현보다 앞서 있으므로 모든 설계 테이블을 즉시
 - back/src/main/java/com/showdown/backend/config/SecurityConfig.java
 - back/src/main/java/com/showdown/backend/domain
 - back/src/test/java/com/showdown/backend/api/ShowdownApiIntegrationTests.java
-- sql/01_create_schema.sql
+- database/sql/V1__create_schema.sql
 - showdown_architecture_design.txt
 - showdown_database_design.txt
 

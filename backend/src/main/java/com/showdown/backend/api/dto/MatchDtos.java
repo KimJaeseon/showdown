@@ -1,6 +1,7 @@
 package com.showdown.backend.api.dto;
 
 import com.showdown.backend.domain.MatchSide;
+import com.showdown.backend.domain.MatchEndReason;
 import com.showdown.backend.domain.MatchStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +22,7 @@ public final class MatchDtos {
             OffsetDateTime scheduledAt,
             String courtName,
             @Positive Integer durationMinutes,
+            Integer maxSets,
             String refereeName,
             List<UUID> refereeOfficialIds,
             @NotNull UUID player1TournamentPlayerId,
@@ -39,6 +41,7 @@ public final class MatchDtos {
             OffsetDateTime scheduledAt,
             String courtName,
             Integer durationMinutes,
+            Integer maxSets,
             String refereeName,
             List<UUID> refereeOfficialIds,
             List<String> refereeNames,
@@ -48,6 +51,8 @@ public final class MatchDtos {
             String player2Name,
             UUID winnerTournamentPlayerId,
             MatchStatus status,
+            MatchEndReason endReason,
+            String resultNote,
             Integer player1SetsWon,
             Integer player2SetsWon,
             Integer player1TotalPoints,
@@ -66,7 +71,22 @@ public final class MatchDtos {
 
     public record MatchSetsUpdateRequest(
             @NotNull Integer version,
-            @Valid List<MatchSetRequest> sets
+            @Valid List<MatchSetRequest> sets,
+            String changeReason
+    ) {
+    }
+
+    public record MatchConfirmRequest(
+            @NotNull Integer version,
+            String changeReason
+    ) {
+    }
+
+    public record MatchSpecialFinishRequest(
+            @NotNull Integer version,
+            @NotNull MatchEndReason reason,
+            @NotNull MatchSide winnerSide,
+            String note
     ) {
     }
 

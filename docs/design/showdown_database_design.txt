@@ -907,11 +907,11 @@ matches.version을 사용한다.
 showdown_tournament 데이터베이스를 생성한다.
 psql에서 실행하는 것을 기준으로 한다.
 
-01_create_schema.sql:
+V1__create_schema.sql:
 확장 기능, enum 타입, 테이블, 제약 조건, 인덱스를 생성한다.
 showdown_tournament 데이터베이스에 접속한 뒤 실행한다.
 
-02_seed_minimum_data.sql:
+V2__seed_minimum_data.sql:
 기본 권한 역할과 기본 순위 규칙 템플릿을 입력한다.
 실제 대회, 실제 선수, 실제 경기 샘플 데이터는 넣지 않는다.
 

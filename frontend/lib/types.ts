@@ -15,6 +15,7 @@ export type DivisionCategory =
 
 export type StageType = "round_robin" | "knockout" | "placement";
 export type MatchStatus = "scheduled" | "running" | "completed" | "cancelled" | "walkover";
+export type MatchEndReason = "normal" | "giving_up" | "default_loss" | "bye";
 export type MatchSide = "player1" | "player2";
 
 export interface Tournament {
@@ -106,9 +107,13 @@ export interface Match {
   matchNo: number;
   scheduledAt: string;
   durationMinutes: number;
+  maxSets?: 1 | 3 | 5;
   courtName: string;
   refereeName?: string;
+  refereeOfficialIds?: string[];
   status: MatchStatus;
+  endReason: MatchEndReason;
+  resultNote?: string;
   player1TournamentPlayerId: string;
   player2TournamentPlayerId: string;
   winnerTournamentPlayerId?: string;
@@ -168,4 +173,22 @@ export interface ScorePreview {
   player1TotalPoints: number;
   player2TotalPoints: number;
   winnerName: string;
+}
+
+export interface PlayerPortalStats {
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  setsWon: number;
+  setsLost: number;
+  pointsFor: number;
+  pointsAgainst: number;
+}
+
+export interface PlayerPortal {
+  player: TournamentPlayer;
+  nextMatch?: Match;
+  scheduledMatches: Match[];
+  completedMatches: Match[];
+  stats: PlayerPortalStats;
 }

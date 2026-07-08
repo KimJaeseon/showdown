@@ -5,6 +5,7 @@ import com.showdown.backend.api.dto.GroupDtos.GroupResponse;
 import com.showdown.backend.api.dto.MatchDtos.MatchResponse;
 import com.showdown.backend.api.dto.PlayerDtos.TournamentPlayerResponse;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentResponse;
+import com.showdown.backend.api.dto.RankingDtos.RankingResponse;
 import com.showdown.backend.domain.MatchStatus;
 import com.showdown.backend.service.PublicQueryService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -65,5 +66,11 @@ public class PublicTournamentController {
         return publicQueryService.getMatches(tournamentCode, status).stream()
                 .map(match -> ApiMapper.toMatchResponse(match, publicQueryService.getMatchSets(match.getId())))
                 .toList();
+    }
+
+    @GetMapping("/{tournamentCode}/rankings")
+    @Operation(summary = "공개 순위 조회")
+    public List<RankingResponse> rankings(@PathVariable String tournamentCode) {
+        return publicQueryService.getRankings(tournamentCode).stream().map(ApiMapper::toRankingResponse).toList();
     }
 }

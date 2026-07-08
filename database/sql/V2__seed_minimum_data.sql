@@ -1,4 +1,4 @@
--- Showdown Tournament 최소 기본 데이터 입력 스크립트
+-- Showdown Tournament 최소 기본 데이터 입력 스크립트 (Flyway V2)
 -- 실제 대회, 선수, 경기 샘플 데이터는 넣지 않는다.
 
 BEGIN;
@@ -8,7 +8,7 @@ VALUES
     ('system_admin', 'System administrator', '시스템 전체를 관리할 수 있는 권한'),
     ('tournament_admin', 'Tournament administrator', '특정 대회를 관리할 수 있는 권한'),
     ('scorer', 'Scorer', '경기 점수와 결과를 입력할 수 있는 권한'),
-    ('viewer', 'Viewer', '로그인 후 조회할 수 있는 권한')
+    ('player', 'Player', '본인의 경기 일정과 결과를 조회할 수 있는 권한')
 ON CONFLICT (code) DO UPDATE
 SET
     name = EXCLUDED.name,
