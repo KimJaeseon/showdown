@@ -101,6 +101,18 @@ async function seedTournament(api: APIRequestContext): Promise<E2EState> {
     clubName: "Red Club",
     status: "ACTIVE",
   });
+  const official1 = await postJson(api, `/api/admin/tournaments/${tournament.id}/officials`, {
+    name: `Referee A ${suffix}`,
+    shortCode: `RA-${suffix}`,
+    roleName: "Referee",
+    active: true,
+  });
+  const official2 = await postJson(api, `/api/admin/tournaments/${tournament.id}/officials`, {
+    name: `Referee B ${suffix}`,
+    shortCode: `RB-${suffix}`,
+    roleName: "Referee",
+    active: true,
+  });
 
   const stage = await postJson(api, `/api/admin/tournaments/${tournament.id}/stages`, {
     divisionId: division.id,
@@ -126,6 +138,7 @@ async function seedTournament(api: APIRequestContext): Promise<E2EState> {
     scheduledAt: "2026-07-01T10:00:00+09:00",
     courtName,
     refereeName: "Ref E2E",
+    refereeOfficialIds: [official1.id, official2.id],
     player1TournamentPlayerId: player1.id,
     player2TournamentPlayerId: player2.id,
     status: "SCHEDULED",
