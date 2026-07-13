@@ -2,6 +2,7 @@ package com.showdown.backend.domain;
 
 public enum AppRole {
     ADMIN("system_admin"),
+    TOURNAMENT_ADMIN("tournament_admin"),
     REFEREE("scorer"),
     PLAYER("player");
 
@@ -16,9 +17,6 @@ public enum AppRole {
     }
 
     public static AppRole fromRoleCode(String roleCode) {
-        if ("tournament_admin".equals(roleCode)) {
-            return ADMIN;
-        }
         for (AppRole role : values()) {
             if (role.roleCode.equals(roleCode)) {
                 return role;

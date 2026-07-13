@@ -11,6 +11,7 @@ import com.showdown.backend.api.dto.StageDtos.StageRequest;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentRequest;
 import com.showdown.backend.api.dto.UserDtos.UserRequest;
 import com.showdown.backend.api.ApiConflictException;
+import com.showdown.backend.domain.AppRole;
 import com.showdown.backend.domain.AppUser;
 import com.showdown.backend.domain.Division;
 import com.showdown.backend.domain.Match;
@@ -37,6 +38,7 @@ import com.showdown.backend.repository.RoleRepository;
 import com.showdown.backend.repository.StageRepository;
 import com.showdown.backend.repository.TournamentPlayerRepository;
 import com.showdown.backend.repository.TournamentRepository;
+import com.showdown.backend.security.TournamentAccessGuard;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -67,6 +69,7 @@ public class TournamentAdminService {
     private final PasswordEncoder passwordEncoder;
     private final RankingService rankingService;
     private final AuditLogService auditLogService;
+    private final TournamentAccessGuard accessGuard;
 
     public TournamentAdminService(
             TournamentRepository tournaments,
@@ -83,7 +86,8 @@ public class TournamentAdminService {
             RoleRepository roles,
             PasswordEncoder passwordEncoder,
             RankingService rankingService,
-            AuditLogService auditLogService
+            AuditLogService auditLogService,
+            TournamentAccessGuard accessGuard
     ) {
         this.tournaments = tournaments;
         this.divisions = divisions;
@@ -100,9 +104,11 @@ public class TournamentAdminService {
         this.passwordEncoder = passwordEncoder;
         this.rankingService = rankingService;
         this.auditLogService = auditLogService;
+        this.accessGuard = accessGuard;
     }
 
     public Tournament createTournament(TournamentRequest request) {
+        accessGuard.requireSystemAdmin();
         Tournament tournament = new Tournament();
         applyTournament(tournament, request);
         return tournaments.save(tournament);
@@ -110,6 +116,7 @@ public class TournamentAdminService {
 
     public Tournament updateTournament(UUID id, TournamentRequest request) {
         Tournament tournament = getTournament(id);
+        accessGuard.requireTournamentAccess(tournament);
         if (request.status().ordinal() < tournament.getStatus().ordinal()) {
             throw new IllegalArgumentException("대회 상태를 역방향으로 변경하려면 별도의 재개방 절차가 필요합니다.");
         }
@@ -121,28 +128,36 @@ public class TournamentAdminService {
     }
 
     public void deleteTournament(UUID id) {
-        tournaments.delete(getTournament(id));
+        Tournament tournament = getTournament(id);
+        accessGuard.requireTournamentAccess(tournament);
+        tournaments.delete(tournament);
     }
 
     public Division createDivision(UUID tournamentId, DivisionRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
         Division division = new Division();
-        division.setTournament(getTournament(tournamentId));
+        division.setTournament(tournament);
         applyDivision(division, request);
         return divisions.save(division);
     }
 
     public Division updateDivision(UUID id, DivisionRequest request) {
         Division division = getDivision(id);
+        accessGuard.requireTournamentAccess(division.getTournament());
         applyDivision(division, request);
         return division;
     }
 
     public void deleteDivision(UUID id) {
-        divisions.delete(getDivision(id));
+        Division division = getDivision(id);
+        accessGuard.requireTournamentAccess(division.getTournament());
+        divisions.delete(division);
     }
 
     public TournamentPlayer createTournamentPlayer(UUID tournamentId, TournamentPlayerRequest request) {
         Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
         Division division = getDivision(request.divisionId());
         requireSameTournament(tournament, division.getTournament(), "부문");
         Player player = new Player();
@@ -159,6 +174,7 @@ public class TournamentAdminService {
 
     public TournamentPlayer updateTournamentPlayer(UUID id, TournamentPlayerRequest request) {
         TournamentPlayer entry = getTournamentPlayer(id);
+        accessGuard.requireTournamentAccess(entry.getTournament());
         Division nextDivision = getDivision(request.divisionId());
         requireSameTournament(entry.getTournament(), nextDivision.getTournament(), "부문");
         applyPlayer(entry.getPlayer(), request);
@@ -168,28 +184,36 @@ public class TournamentAdminService {
     }
 
     public void deleteTournamentPlayer(UUID id) {
-        tournamentPlayers.delete(getTournamentPlayer(id));
+        TournamentPlayer entry = getTournamentPlayer(id);
+        accessGuard.requireTournamentAccess(entry.getTournament());
+        tournamentPlayers.delete(entry);
     }
 
     public Official createOfficial(UUID tournamentId, OfficialRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
         Official official = new Official();
-        official.setTournament(getTournament(tournamentId));
+        official.setTournament(tournament);
         applyOfficial(official, request);
         return officials.save(official);
     }
 
     public Official updateOfficial(UUID id, OfficialRequest request) {
         Official official = getOfficial(id);
+        accessGuard.requireTournamentAccess(official.getTournament());
         applyOfficial(official, request);
         return official;
     }
 
     public void deleteOfficial(UUID id) {
-        officials.delete(getOfficial(id));
+        Official official = getOfficial(id);
+        accessGuard.requireTournamentAccess(official.getTournament());
+        officials.delete(official);
     }
 
     public Stage createStage(UUID tournamentId, StageRequest request) {
         Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
         Division division = getDivision(request.divisionId());
         requireSameTournament(tournament, division.getTournament(), "부문");
         Stage stage = new Stage();
@@ -200,17 +224,21 @@ public class TournamentAdminService {
 
     public Stage updateStage(UUID id, StageRequest request) {
         Stage stage = stages.findById(id).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        accessGuard.requireTournamentAccess(stage.getTournament());
         requireSameTournament(stage.getTournament(), getDivision(request.divisionId()).getTournament(), "부문");
         applyStage(stage, request);
         return stage;
     }
 
     public void deleteStage(UUID id) {
-        stages.delete(stages.findById(id).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다.")));
+        Stage stage = stages.findById(id).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
+        accessGuard.requireTournamentAccess(stage.getTournament());
+        stages.delete(stage);
     }
 
     public TournamentGroup createGroup(UUID tournamentId, GroupRequest request) {
         Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
         Division division = getDivision(request.divisionId());
         Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
         requireSameTournament(tournament, division.getTournament(), "부문");
@@ -226,6 +254,7 @@ public class TournamentAdminService {
 
     public TournamentGroup updateGroup(UUID id, GroupRequest request) {
         TournamentGroup group = getGroup(id);
+        accessGuard.requireTournamentAccess(group.getTournament());
         Division division = getDivision(request.divisionId());
         Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
         requireSameTournament(group.getTournament(), division.getTournament(), "부문");
@@ -236,26 +265,33 @@ public class TournamentAdminService {
     }
 
     public void deleteGroup(UUID id) {
-        groups.delete(getGroup(id));
+        TournamentGroup group = getGroup(id);
+        accessGuard.requireTournamentAccess(group.getTournament());
+        groups.delete(group);
     }
 
     public Match createMatch(UUID tournamentId, MatchRequest request) {
-        validateMatchReferences(getTournament(tournamentId), request);
+        Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
+        validateMatchReferences(tournament, request);
         Match match = new Match();
-        match.setTournament(getTournament(tournamentId));
+        match.setTournament(tournament);
         applyMatch(match, request);
         return matches.save(match);
     }
 
     public Match updateMatch(UUID id, MatchRequest request) {
         Match match = getMatch(id);
+        accessGuard.requireTournamentAccess(match.getTournament());
         validateMatchReferences(match.getTournament(), request);
         applyMatch(match, request);
         return match;
     }
 
     public void deleteMatch(UUID id) {
-        matches.delete(getMatch(id));
+        Match match = getMatch(id);
+        accessGuard.requireTournamentAccess(match.getTournament());
+        matches.delete(match);
     }
 
     public Match updateMatchSets(UUID matchId, MatchSetsUpdateRequest request) {
@@ -265,6 +301,7 @@ public class TournamentAdminService {
 
     public Match saveMatchSetDraft(UUID matchId, MatchSetsUpdateRequest request) {
         Match match = getMatch(matchId);
+        accessGuard.requireMatchScoringAccess(match);
         Map<String, Object> before = scoreState(match);
         if (!match.getVersion().equals(request.version())) {
             throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
@@ -313,6 +350,7 @@ public class TournamentAdminService {
 
     public Match confirmMatchResult(UUID matchId, Integer version, String changeReason) {
         Match match = getMatch(matchId);
+        accessGuard.requireMatchScoringAccess(match);
         if (!match.getVersion().equals(version)) {
             throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
         }
@@ -328,21 +366,32 @@ public class TournamentAdminService {
             throw new IllegalArgumentException("특수 종료 승자를 선택해야 합니다.");
         }
         Match match = getMatch(matchId);
+        accessGuard.requireMatchScoringAccess(match);
         if (!match.getVersion().equals(version)) {
             throw new ApiConflictException("경기 버전이 다릅니다. 최신 데이터를 다시 조회하세요.");
         }
         requireChangeReasonForResultEdit(match, note);
         Map<String, Object> before = scoreState(match);
-        matchSets.deleteByMatchId(matchId);
+
+        // DEFAULT_LOSS와 BYE는 기존 세트/득점을 무효화한다. GIVING_UP은 이미 확정된 세트와 기득점을 유지한다.
+        boolean voidsPriorSets = reason == MatchEndReason.DEFAULT_LOSS || reason == MatchEndReason.BYE;
+        int winnerSetsAlready = winnerSide == MatchSide.PLAYER1 ? match.getPlayer1SetsWon() : match.getPlayer2SetsWon();
+        int nextSetNo = getMatchSets(matchId).size() + 1;
+        if (voidsPriorSets) {
+            matchSets.deleteByMatchId(matchId);
+            resetScore(match);
+            winnerSetsAlready = 0;
+            nextSetNo = 1;
+        }
+
         match.setWinner(winnerSide == MatchSide.PLAYER1 ? match.getPlayer1() : match.getPlayer2());
         match.setStatus(MatchStatus.WALKOVER);
         match.setEndReason(reason);
         match.setResultNote(cleanNote(note));
-        resetScore(match);
 
         if (reason != MatchEndReason.BYE) {
             int neededWins = match.getMaxSets() / 2 + 1;
-            for (int setNo = 1; setNo <= neededWins; setNo++) {
+            for (int setNo = nextSetNo; winnerSetsAlready < neededWins; setNo++, winnerSetsAlready++) {
                 createSyntheticSet(match, setNo, winnerSide);
             }
             applyScoreFromSets(match);
@@ -462,18 +511,21 @@ public class TournamentAdminService {
     }
 
     public AppUser createUser(UserRequest request) {
+        accessGuard.requireSystemAdmin();
         AppUser user = new AppUser();
         applyUser(user, request);
         return users.save(user);
     }
 
     public AppUser updateUser(UUID id, UserRequest request) {
+        accessGuard.requireSystemAdmin();
         AppUser user = users.findById(id).orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다."));
         applyUser(user, request);
         return user;
     }
 
     public void deleteUser(UUID id) {
+        accessGuard.requireSystemAdmin();
         users.deleteById(id);
     }
 
@@ -691,9 +743,20 @@ public class TournamentAdminService {
         user.setDisplayName(request.displayName());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setTournamentPlayer(request.tournamentPlayerId() == null ? null : getTournamentPlayer(request.tournamentPlayerId()));
+        user.setOfficial(request.officialId() == null ? null : getOfficial(request.officialId()));
         Role role = roles.findByCode(request.role().getRoleCode())
                 .orElseThrow(() -> new EntityNotFoundException("역할을 찾을 수 없습니다: " + request.role().getRoleCode()));
-        user.replaceGlobalRole(role);
+        if (request.role() == AppRole.TOURNAMENT_ADMIN) {
+            if (request.tournamentId() == null) {
+                throw new IllegalArgumentException("대회 관리자 역할은 대회를 지정해야 합니다.");
+            }
+            user.replaceRole(role, getTournament(request.tournamentId()));
+        } else {
+            if (request.tournamentId() != null) {
+                throw new IllegalArgumentException("전역 역할에는 대회를 지정할 수 없습니다.");
+            }
+            user.replaceGlobalRole(role);
+        }
         user.setActive(request.active() == null || request.active());
     }
 }

@@ -6,6 +6,7 @@ import com.showdown.backend.domain.ParticipantStatus;
 import com.showdown.backend.domain.TournamentGroup;
 import com.showdown.backend.domain.TournamentPlayer;
 import com.showdown.backend.repository.GroupMemberRepository;
+import com.showdown.backend.security.TournamentAccessGuard;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
@@ -17,10 +18,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class GroupMemberService {
     private final GroupMemberRepository members;
     private final TournamentAdminService adminService;
+    private final TournamentAccessGuard accessGuard;
 
-    public GroupMemberService(GroupMemberRepository members, TournamentAdminService adminService) {
+    public GroupMemberService(GroupMemberRepository members, TournamentAdminService adminService, TournamentAccessGuard accessGuard) {
         this.members = members;
         this.adminService = adminService;
+        this.accessGuard = accessGuard;
     }
 
     @Transactional(readOnly = true)
@@ -31,6 +34,7 @@ public class GroupMemberService {
 
     public GroupMember add(UUID groupId, GroupMemberRequest request) {
         TournamentGroup group = adminService.getGroup(groupId);
+        accessGuard.requireTournamentAccess(group.getTournament());
         TournamentPlayer player = adminService.getTournamentPlayer(request.tournamentPlayerId());
         if (!group.getTournament().getId().equals(player.getTournament().getId())
                 || !group.getDivision().getId().equals(player.getDivision().getId())) {
@@ -59,6 +63,7 @@ public class GroupMemberService {
         if (!member.getGroup().getId().equals(groupId)) {
             throw new IllegalArgumentException("요청한 조의 구성원이 아닙니다.");
         }
+        accessGuard.requireTournamentAccess(member.getGroup().getTournament());
         members.delete(member);
     }
 }

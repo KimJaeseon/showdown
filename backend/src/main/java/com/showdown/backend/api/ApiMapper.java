@@ -160,6 +160,8 @@ public final class ApiMapper {
                 user.getDisplayName(),
                 user.getRole(),
                 user.getTournamentPlayer() == null ? null : user.getTournamentPlayer().getId(),
+                user.getRoleTournamentId(),
+                user.getOfficial() == null ? null : user.getOfficial().getId(),
                 user.getActive()
         );
     }

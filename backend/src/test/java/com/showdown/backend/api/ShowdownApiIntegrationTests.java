@@ -237,6 +237,47 @@ class ShowdownApiIntegrationTests {
 
         matchRequest.put("matchNo", 3);
         matchRequest.put("scheduledAt", "2026-07-01T12:00:00+09:00");
+        JsonNode givingUpMatch = postAdmin("/api/admin/tournaments/" + tournamentId + "/matches", matchRequest);
+
+        String givingUpDraftJson = mockMvc.perform(put("/api/scoring/matches/" + givingUpMatch.get("id").asText() + "/draft")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", givingUpMatch.get("version").asInt(),
+                                "sets", new Object[] {
+                                        Map.of("setNo", 1, "player1Score", 11, "player2Score", 7)
+                                }
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode givingUpDraftBody = objectMapper.readTree(givingUpDraftJson);
+
+        // TDD-18: 기권(GIVING_UP)은 이미 확정된 세트를 유지하고 상대에게 필요한 최소 세트만 부여해야 한다.
+        mockMvc.perform(post("/api/scoring/matches/" + givingUpMatch.get("id").asText() + "/finish-special")
+                        .with(httpBasic(REFEREE_USER, REFEREE_PASSWORD))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "version", givingUpDraftBody.get("version").asInt(),
+                                "reason", "GIVING_UP",
+                                "winnerSide", "PLAYER2",
+                                "note", "부상으로 기권"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("WALKOVER"))
+                .andExpect(jsonPath("$.endReason").value("GIVING_UP"))
+                .andExpect(jsonPath("$.winnerTournamentPlayerId").value(player2.get("id").asText()))
+                .andExpect(jsonPath("$.player1SetsWon").value(1))
+                .andExpect(jsonPath("$.player2SetsWon").value(2))
+                .andExpect(jsonPath("$.sets", hasSize(3)))
+                .andExpect(jsonPath("$.sets[0].player1Score").value(11))
+                .andExpect(jsonPath("$.sets[0].player2Score").value(7))
+                .andExpect(jsonPath("$.sets[1].player1Score").value(0))
+                .andExpect(jsonPath("$.sets[1].player2Score").value(11))
+                .andExpect(jsonPath("$.sets[2].player1Score").value(0))
+                .andExpect(jsonPath("$.sets[2].player2Score").value(11));
+
+        matchRequest.put("matchNo", 4);
+        matchRequest.put("scheduledAt", "2026-07-01T13:00:00+09:00");
         JsonNode byeMatch = postAdmin("/api/admin/tournaments/" + tournamentId + "/matches", matchRequest);
 
         mockMvc.perform(post("/api/scoring/matches/" + byeMatch.get("id").asText() + "/finish-special")
@@ -267,17 +308,17 @@ class ShowdownApiIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].rankNo").value(1))
-                .andExpect(jsonPath("$[0].matchesPlayed").value(2));
+                .andExpect(jsonPath("$[0].matchesPlayed").value(3));
 
         mockMvc.perform(get("/api/admin/tournaments/" + tournamentId + "/audit-logs")
                         .with(httpBasic(ADMIN_USER, ADMIN_PASSWORD)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$", hasSize(6)))
                 .andExpect(jsonPath("$[0].action").value("SPECIAL_RESULT_CONFIRMED"));
 
         mockMvc.perform(get("/api/public/tournaments/" + tournamentCode + "/matches"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(3)))
+                .andExpect(jsonPath("$", hasSize(4)))
                 .andExpect(jsonPath("$[0].status").value("COMPLETED"))
                 .andExpect(jsonPath("$[0].courtName").value("Court 1"))
                 .andExpect(jsonPath("$[0].refereeNames", hasSize(2)))

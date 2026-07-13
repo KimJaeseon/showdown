@@ -16,6 +16,8 @@ public final class UserDtos {
             @NotBlank String displayName,
             @NotNull AppRole role,
             UUID tournamentPlayerId,
+            UUID tournamentId,
+            UUID officialId,
             Boolean active
     ) {
     }
@@ -26,6 +28,8 @@ public final class UserDtos {
             String displayName,
             AppRole role,
             UUID tournamentPlayerId,
+            UUID tournamentId,
+            UUID officialId,
             Boolean active
     ) {
     }
