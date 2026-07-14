@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface GroupRepository extends JpaRepository<TournamentGroup, UUID> {
     List<TournamentGroup> findByTournamentIdOrderByDivisionSortOrderAscSortOrderAsc(UUID tournamentId);
+    List<TournamentGroup> findByStageIdOrderBySortOrderAsc(UUID stageId);
 }

@@ -50,6 +50,10 @@ public class Match extends BaseEntity {
     @Column(name = "court_name", length = 80)
     private String courtName;
 
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "court_id")
+    private Court court;
+
     @Column(name = "duration_minutes")
     private Integer durationMinutes;
 
@@ -150,6 +154,14 @@ public class Match extends BaseEntity {
 
     public void setCourtName(String courtName) {
         this.courtName = courtName;
+    }
+
+    public Court getCourt() {
+        return court;
+    }
+
+    public void setCourt(Court court) {
+        this.court = court;
     }
 
     public Integer getDurationMinutes() {

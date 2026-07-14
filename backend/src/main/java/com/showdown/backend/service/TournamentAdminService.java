@@ -1,5 +1,6 @@
 package com.showdown.backend.service;
 
+import com.showdown.backend.api.dto.CourtDtos.CourtRequest;
 import com.showdown.backend.api.dto.DivisionDtos.DivisionRequest;
 import com.showdown.backend.api.dto.GroupDtos.GroupRequest;
 import com.showdown.backend.api.dto.MatchDtos.MatchRequest;
@@ -13,6 +14,7 @@ import com.showdown.backend.api.dto.UserDtos.UserRequest;
 import com.showdown.backend.api.ApiConflictException;
 import com.showdown.backend.domain.AppRole;
 import com.showdown.backend.domain.AppUser;
+import com.showdown.backend.domain.Court;
 import com.showdown.backend.domain.Division;
 import com.showdown.backend.domain.Match;
 import com.showdown.backend.domain.MatchEndReason;
@@ -23,10 +25,12 @@ import com.showdown.backend.domain.Official;
 import com.showdown.backend.domain.Player;
 import com.showdown.backend.domain.Role;
 import com.showdown.backend.domain.Stage;
+import com.showdown.backend.domain.StageStatus;
 import com.showdown.backend.domain.Tournament;
 import com.showdown.backend.domain.TournamentGroup;
 import com.showdown.backend.domain.TournamentPlayer;
 import com.showdown.backend.repository.AppUserRepository;
+import com.showdown.backend.repository.CourtRepository;
 import com.showdown.backend.repository.DivisionRepository;
 import com.showdown.backend.repository.GroupRepository;
 import com.showdown.backend.repository.MatchRepository;
@@ -59,6 +63,7 @@ public class TournamentAdminService {
     private final PlayerRepository players;
     private final TournamentPlayerRepository tournamentPlayers;
     private final OfficialRepository officials;
+    private final CourtRepository courts;
     private final StageRepository stages;
     private final GroupRepository groups;
     private final MatchRepository matches;
@@ -77,6 +82,7 @@ public class TournamentAdminService {
             PlayerRepository players,
             TournamentPlayerRepository tournamentPlayers,
             OfficialRepository officials,
+            CourtRepository courts,
             StageRepository stages,
             GroupRepository groups,
             MatchRepository matches,
@@ -94,6 +100,7 @@ public class TournamentAdminService {
         this.players = players;
         this.tournamentPlayers = tournamentPlayers;
         this.officials = officials;
+        this.courts = courts;
         this.stages = stages;
         this.groups = groups;
         this.matches = matches;
@@ -211,6 +218,28 @@ public class TournamentAdminService {
         officials.delete(official);
     }
 
+    public Court createCourt(UUID tournamentId, CourtRequest request) {
+        Tournament tournament = getTournament(tournamentId);
+        accessGuard.requireTournamentAccess(tournament);
+        Court court = new Court();
+        court.setTournament(tournament);
+        applyCourt(court, request);
+        return courts.save(court);
+    }
+
+    public Court updateCourt(UUID id, CourtRequest request) {
+        Court court = getCourt(id);
+        accessGuard.requireTournamentAccess(court.getTournament());
+        applyCourt(court, request);
+        return court;
+    }
+
+    public void deleteCourt(UUID id) {
+        Court court = getCourt(id);
+        accessGuard.requireTournamentAccess(court.getTournament());
+        courts.delete(court);
+    }
+
     public Stage createStage(UUID tournamentId, StageRequest request) {
         Tournament tournament = getTournament(tournamentId);
         accessGuard.requireTournamentAccess(tournament);
@@ -226,8 +255,24 @@ public class TournamentAdminService {
         Stage stage = stages.findById(id).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
         accessGuard.requireTournamentAccess(stage.getTournament());
         requireSameTournament(stage.getTournament(), getDivision(request.divisionId()).getTournament(), "부문");
+        StageStatus previousStatus = stage.getStatus();
+        if (request.status() != null) {
+            validateStageStatusTransition(previousStatus, request.status());
+        }
         applyStage(stage, request);
+        if (request.status() == StageStatus.FINISHED && previousStatus != StageStatus.FINISHED) {
+            rankingService.recalculateStageFinal(stage);
+        }
         return stage;
+    }
+
+    private void validateStageStatusTransition(StageStatus current, StageStatus next) {
+        if (next.ordinal() < current.ordinal()) {
+            throw new IllegalArgumentException("단계 상태를 역방향으로 변경하려면 별도의 재개방 절차가 필요합니다.");
+        }
+        if (next.ordinal() > current.ordinal() + 1) {
+            throw new IllegalArgumentException("단계 상태는 한 단계씩 변경해야 합니다.");
+        }
     }
 
     public void deleteStage(UUID id) {
@@ -545,6 +590,10 @@ public class TournamentAdminService {
         return officials.findById(id).orElseThrow(() -> new EntityNotFoundException("심판을 찾을 수 없습니다."));
     }
 
+    public Court getCourt(UUID id) {
+        return courts.findById(id).orElseThrow(() -> new EntityNotFoundException("코트를 찾을 수 없습니다."));
+    }
+
     public TournamentGroup getGroup(UUID id) {
         return groups.findById(id).orElseThrow(() -> new EntityNotFoundException("조를 찾을 수 없습니다."));
     }
@@ -601,11 +650,18 @@ public class TournamentAdminService {
         official.setActive(request.active() == null || request.active());
     }
 
+    private void applyCourt(Court court, CourtRequest request) {
+        court.setName(request.name());
+        court.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        court.setActive(request.active() == null || request.active());
+    }
+
     private void applyStage(Stage stage, StageRequest request) {
         stage.setDivision(getDivision(request.divisionId()));
         stage.setName(request.name());
         stage.setStageType(request.stageType());
         stage.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        stage.setStatus(request.status() == null ? stage.getStatus() : request.status());
     }
 
     private void applyGroup(TournamentGroup group, GroupRequest request) {
@@ -623,7 +679,9 @@ public class TournamentAdminService {
         match.setGroup(request.groupId() == null ? null : getGroup(request.groupId()));
         match.setMatchNo(request.matchNo());
         match.setScheduledAt(request.scheduledAt());
-        match.setCourtName(request.courtName());
+        Court court = resolveCourt(match.getTournament(), request.courtId());
+        match.setCourt(court);
+        match.setCourtName(request.courtName() != null ? request.courtName() : (court == null ? null : court.getName()));
         match.setDurationMinutes(request.durationMinutes() == null ? 30 : request.durationMinutes());
         int maxSets = request.maxSets() == null ? 3 : request.maxSets();
         if (maxSets != 1 && maxSets != 3 && maxSets != 5) throw new IllegalArgumentException("경기 형식은 1·3·5세트제만 지원합니다.");
@@ -641,6 +699,20 @@ public class TournamentAdminService {
         List<Official> assignedOfficials = resolveAssignedOfficials(match.getTournament(), request.refereeOfficialIds());
         validateScheduleConflicts(match, assignedOfficials);
         match.replaceOfficials(assignedOfficials);
+    }
+
+    private Court resolveCourt(Tournament tournament, UUID courtId) {
+        if (courtId == null) {
+            return null;
+        }
+        Court court = getCourt(courtId);
+        if (!court.getTournament().getId().equals(tournament.getId())) {
+            throw new IllegalArgumentException("경기와 같은 대회의 코트만 배정할 수 있습니다.");
+        }
+        if (!Boolean.TRUE.equals(court.getActive())) {
+            throw new IllegalArgumentException("비활성 코트는 배정할 수 없습니다: " + court.getName());
+        }
+        return court;
     }
 
     private List<Official> resolveAssignedOfficials(Tournament tournament, List<UUID> officialIds) {
@@ -683,9 +755,7 @@ public class TournamentAdminService {
             if (!overlaps(targetStart, targetEnd, existingStart, existingEnd)) {
                 continue;
             }
-            if (target.getCourtName() != null
-                    && existing.getCourtName() != null
-                    && target.getCourtName().equalsIgnoreCase(existing.getCourtName())) {
+            if (hasSameCourt(target, existing)) {
                 throw new IllegalArgumentException("같은 시간대에 동일 코트를 중복 배정할 수 없습니다: " + target.getCourtName());
             }
             boolean hasOfficialConflict = existing.getMatchOfficials().stream()
@@ -699,6 +769,16 @@ public class TournamentAdminService {
                 throw new IllegalArgumentException("같은 시간대에 동일 선수를 중복 배정할 수 없습니다.");
             }
         }
+    }
+
+    /** TDD-24: 코트 엔티티가 배정된 경기는 court_id로, 그렇지 않은 경기는 기존처럼 courtName 문자열로 충돌을 비교한다. */
+    private boolean hasSameCourt(Match target, Match existing) {
+        if (target.getCourt() != null && existing.getCourt() != null) {
+            return target.getCourt().getId().equals(existing.getCourt().getId());
+        }
+        return target.getCourtName() != null
+                && existing.getCourtName() != null
+                && target.getCourtName().equalsIgnoreCase(existing.getCourtName());
     }
 
     private boolean overlaps(OffsetDateTime leftStart, OffsetDateTime leftEnd, OffsetDateTime rightStart, OffsetDateTime rightEnd) {

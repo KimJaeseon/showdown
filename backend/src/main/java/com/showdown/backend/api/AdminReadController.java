@@ -1,5 +1,6 @@
 package com.showdown.backend.api;
 
+import com.showdown.backend.api.dto.CourtDtos.CourtResponse;
 import com.showdown.backend.api.dto.DivisionDtos.DivisionResponse;
 import com.showdown.backend.api.dto.GroupDtos.GroupResponse;
 import com.showdown.backend.api.dto.MatchDtos.MatchResponse;
@@ -7,6 +8,7 @@ import com.showdown.backend.api.dto.OfficialDtos.OfficialResponse;
 import com.showdown.backend.api.dto.PlayerDtos.TournamentPlayerResponse;
 import com.showdown.backend.api.dto.StageDtos.StageResponse;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentResponse;
+import com.showdown.backend.repository.CourtRepository;
 import com.showdown.backend.repository.DivisionRepository;
 import com.showdown.backend.repository.GroupRepository;
 import com.showdown.backend.repository.MatchRepository;
@@ -32,6 +34,7 @@ public class AdminReadController {
     private final DivisionRepository divisions;
     private final TournamentPlayerRepository tournamentPlayers;
     private final OfficialRepository officials;
+    private final CourtRepository courts;
     private final StageRepository stages;
     private final GroupRepository groups;
     private final MatchRepository matches;
@@ -42,6 +45,7 @@ public class AdminReadController {
             DivisionRepository divisions,
             TournamentPlayerRepository tournamentPlayers,
             OfficialRepository officials,
+            CourtRepository courts,
             StageRepository stages,
             GroupRepository groups,
             MatchRepository matches,
@@ -51,6 +55,7 @@ public class AdminReadController {
         this.divisions = divisions;
         this.tournamentPlayers = tournamentPlayers;
         this.officials = officials;
+        this.courts = courts;
         this.stages = stages;
         this.groups = groups;
         this.matches = matches;
@@ -84,6 +89,14 @@ public class AdminReadController {
     public List<OfficialResponse> officials(@PathVariable UUID tournamentId) {
         return officials.findByTournamentIdOrderByNameAsc(tournamentId).stream()
                 .map(ApiMapper::toOfficialResponse)
+                .toList();
+    }
+
+    @GetMapping("/tournaments/{tournamentId}/courts")
+    @Operation(summary = "관리자 코트 목록 조회")
+    public List<CourtResponse> courts(@PathVariable UUID tournamentId) {
+        return courts.findByTournamentIdOrderBySortOrderAsc(tournamentId).stream()
+                .map(ApiMapper::toCourtResponse)
                 .toList();
     }
 

@@ -9,11 +9,10 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.util.UUID;
-import org.hibernate.annotations.ColumnTransformer;
 
 @Entity
-@Table(name = "stages")
-public class Stage extends BaseEntity {
+@Table(name = "courts")
+public class Court extends BaseEntity {
     @Id
     @GeneratedValue
     private UUID id;
@@ -22,23 +21,14 @@ public class Stage extends BaseEntity {
     @JoinColumn(name = "tournament_id")
     private Tournament tournament;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = false)
-    @JoinColumn(name = "division_id")
-    private Division division;
-
-    @Column(nullable = false, length = 120)
+    @Column(nullable = false, length = 80)
     private String name;
-
-    @Column(name = "stage_type", nullable = false, length = 30)
-    @ColumnTransformer(write = "?::stage_type")
-    private StageType stageType = StageType.ROUND_ROBIN;
 
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
 
-    @Column(nullable = false, length = 30)
-    @ColumnTransformer(write = "?::stage_status")
-    private StageStatus status = StageStatus.DRAFT;
+    @Column(name = "is_active", nullable = false)
+    private Boolean active = true;
 
     public UUID getId() {
         return id;
@@ -52,28 +42,12 @@ public class Stage extends BaseEntity {
         this.tournament = tournament;
     }
 
-    public Division getDivision() {
-        return division;
-    }
-
-    public void setDivision(Division division) {
-        this.division = division;
-    }
-
     public String getName() {
         return name;
     }
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public StageType getStageType() {
-        return stageType;
-    }
-
-    public void setStageType(StageType stageType) {
-        this.stageType = stageType;
     }
 
     public Integer getSortOrder() {
@@ -84,11 +58,11 @@ public class Stage extends BaseEntity {
         this.sortOrder = sortOrder;
     }
 
-    public StageStatus getStatus() {
-        return status;
+    public Boolean getActive() {
+        return active;
     }
 
-    public void setStatus(StageStatus status) {
-        this.status = status;
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 }

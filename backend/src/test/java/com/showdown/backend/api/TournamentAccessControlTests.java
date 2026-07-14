@@ -145,13 +145,13 @@ class TournamentAccessControlTests {
         Official unassignedReferee = adminService.createOfficial(tournament.getId(),
                 new OfficialRequest("Unassigned Ref", "UR1", "REFEREE", true));
         Stage stage = adminService.createStage(tournament.getId(),
-                new StageRequest(division.getId(), "Preliminary", StageType.ROUND_ROBIN, 1));
+                new StageRequest(division.getId(), "Preliminary", StageType.ROUND_ROBIN, 1, null));
         TournamentGroup group = adminService.createGroup(tournament.getId(),
                 new GroupRequest(division.getId(), stage.getId(), "A", "Group A", GroupType.LEAGUE, 1));
 
         Match match = adminService.createMatch(tournament.getId(), new MatchRequest(
                 division.getId(), stage.getId(), group.getId(), 1,
-                java.time.OffsetDateTime.parse("2026-07-01T10:00:00+09:00"), "Court 1", 30, 3, null,
+                java.time.OffsetDateTime.parse("2026-07-01T10:00:00+09:00"), "Court 1", null, 30, 3, null,
                 List.of(assignedReferee1.getId(), assignedReferee2.getId()),
                 player1.getId(), player2.getId(), MatchStatus.SCHEDULED));
 

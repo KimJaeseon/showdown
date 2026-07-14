@@ -1,5 +1,7 @@
 package com.showdown.backend.api;
 
+import com.showdown.backend.api.dto.CourtDtos.CourtRequest;
+import com.showdown.backend.api.dto.CourtDtos.CourtResponse;
 import com.showdown.backend.api.dto.DivisionDtos.DivisionRequest;
 import com.showdown.backend.api.dto.DivisionDtos.DivisionResponse;
 import com.showdown.backend.api.dto.GroupDtos.GroupRequest;
@@ -113,6 +115,25 @@ public class AdminTournamentController {
     @Operation(summary = "심판 삭제")
     public ResponseEntity<Void> deleteOfficial(@PathVariable UUID officialId) {
         adminService.deleteOfficial(officialId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/tournaments/{tournamentId}/courts")
+    @Operation(summary = "코트 등록")
+    public CourtResponse createCourt(@PathVariable UUID tournamentId, @Valid @RequestBody CourtRequest request) {
+        return ApiMapper.toCourtResponse(adminService.createCourt(tournamentId, request));
+    }
+
+    @PutMapping("/courts/{courtId}")
+    @Operation(summary = "코트 수정")
+    public CourtResponse updateCourt(@PathVariable UUID courtId, @Valid @RequestBody CourtRequest request) {
+        return ApiMapper.toCourtResponse(adminService.updateCourt(courtId, request));
+    }
+
+    @DeleteMapping("/courts/{courtId}")
+    @Operation(summary = "코트 삭제")
+    public ResponseEntity<Void> deleteCourt(@PathVariable UUID courtId) {
+        adminService.deleteCourt(courtId);
         return ResponseEntity.noContent().build();
     }
 

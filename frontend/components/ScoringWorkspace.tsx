@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AdminFrame } from "@/components/AdminFrame";
 import { EmptyState, ErrorState } from "@/components/StateViews";
 import {
+  ApiError,
   confirmMatchResult,
   finishMatchSpecial,
   getAdminDataset,
@@ -153,8 +154,7 @@ export function ScoringWorkspace() {
       setSets(deriveInitialSets(saved));
       setLiveMessage(`경기 ${selectedMatch.matchNo}번 점수를 임시 저장했습니다. 결과를 확인한 뒤 확정하세요.`);
     } catch (requestError) {
-      setLiveMessage("점수를 저장하지 못했습니다.");
-      setErrors([requestError instanceof Error ? requestError.message : "점수 저장 요청이 실패했습니다."]);
+      await handleRequestError(requestError, "점수 저장 요청이 실패했습니다.", "점수를 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -172,8 +172,7 @@ export function ScoringWorkspace() {
       setLiveMessage(`경기 ${selectedMatch.matchNo}번 결과를 확정하고 순위에 반영했습니다.`);
       setChangeReason("");
     } catch (requestError) {
-      setLiveMessage("결과를 확정하지 못했습니다.");
-      setErrors([requestError instanceof Error ? requestError.message : "결과 확정 요청이 실패했습니다."]);
+      await handleRequestError(requestError, "결과 확정 요청이 실패했습니다.", "결과를 확정하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -200,10 +199,40 @@ export function ScoringWorkspace() {
       setLiveMessage(`경기 ${selectedMatch.matchNo}번을 ${matchEndReasonLabel(updated.endReason)} 처리했습니다.`);
       setChangeReason("");
     } catch (requestError) {
-      setLiveMessage("특수 종료 처리를 완료하지 못했습니다.");
-      setErrors([requestError instanceof Error ? requestError.message : "특수 종료 요청이 실패했습니다."]);
+      await handleRequestError(requestError, "특수 종료 요청이 실패했습니다.", "특수 종료 처리를 완료하지 못했습니다.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  // TDD-28: 409(버전 충돌) 응답은 최신 데이터를 다시 불러와 사용자가 새 버전으로 재시도하도록 안내한다.
+  async function handleRequestError(requestError: unknown, fallbackMessage: string, defaultLiveMessage: string) {
+    if (requestError instanceof ApiError && requestError.status === 409) {
+      const reloadedMatch = await reloadAfterConflict(selectedMatch.id);
+      setLiveMessage(
+        reloadedMatch
+          ? `다른 사용자가 먼저 경기 ${reloadedMatch.matchNo}번을 수정했습니다. 최신 데이터를 다시 불러왔으니 확인 후 다시 시도하세요.`
+          : "다른 사용자가 먼저 이 경기를 수정했습니다. 최신 데이터를 다시 불러오지 못했으니 새로고침 후 다시 시도하세요.",
+      );
+      setErrors([requestError.message]);
+      return;
+    }
+    setLiveMessage(defaultLiveMessage);
+    setErrors([requestError instanceof Error ? requestError.message : fallbackMessage]);
+  }
+
+  async function reloadAfterConflict(matchId: string): Promise<Match | undefined> {
+    try {
+      const refreshed = await getAdminDataset(activeAuth);
+      setDataset(refreshed);
+      const freshMatch = refreshed.matches.find((item) => item.id === matchId);
+      if (freshMatch) {
+        setSelectedMatchId(freshMatch.id);
+        setSets(deriveInitialSets(freshMatch));
+      }
+      return freshMatch;
+    } catch {
+      return undefined;
     }
   }
 

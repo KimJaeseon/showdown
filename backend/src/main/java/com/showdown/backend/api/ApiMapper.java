@@ -1,5 +1,6 @@
 package com.showdown.backend.api;
 
+import com.showdown.backend.api.dto.CourtDtos.CourtResponse;
 import com.showdown.backend.api.dto.DivisionDtos.DivisionResponse;
 import com.showdown.backend.api.dto.GroupDtos.GroupResponse;
 import com.showdown.backend.api.dto.MatchDtos.MatchResponse;
@@ -11,6 +12,7 @@ import com.showdown.backend.api.dto.StageDtos.StageResponse;
 import com.showdown.backend.api.dto.TournamentDtos.TournamentResponse;
 import com.showdown.backend.api.dto.UserDtos.UserResponse;
 import com.showdown.backend.domain.AppUser;
+import com.showdown.backend.domain.Court;
 import com.showdown.backend.domain.Division;
 import com.showdown.backend.domain.Match;
 import com.showdown.backend.domain.MatchOfficial;
@@ -82,6 +84,16 @@ public final class ApiMapper {
         );
     }
 
+    public static CourtResponse toCourtResponse(Court court) {
+        return new CourtResponse(
+                court.getId(),
+                court.getTournament().getId(),
+                court.getName(),
+                court.getSortOrder(),
+                court.getActive()
+        );
+    }
+
     public static StageResponse toStageResponse(Stage stage) {
         return new StageResponse(
                 stage.getId(),
@@ -89,7 +101,8 @@ public final class ApiMapper {
                 stage.getDivision().getId(),
                 stage.getName(),
                 stage.getStageType(),
-                stage.getSortOrder()
+                stage.getSortOrder(),
+                stage.getStatus()
         );
     }
 
@@ -118,6 +131,7 @@ public final class ApiMapper {
                 match.getMatchNo(),
                 match.getScheduledAt(),
                 match.getCourtName(),
+                match.getCourt() == null ? null : match.getCourt().getId(),
                 match.getDurationMinutes(),
                 match.getMaxSets(),
                 refereeNames(match).isEmpty() ? null : String.join(", ", refereeNames(match)),

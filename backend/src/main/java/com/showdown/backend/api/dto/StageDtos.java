@@ -1,5 +1,6 @@
 package com.showdown.backend.api.dto;
 
+import com.showdown.backend.domain.StageStatus;
 import com.showdown.backend.domain.StageType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -13,7 +14,8 @@ public final class StageDtos {
             @NotNull UUID divisionId,
             @NotBlank String name,
             @NotNull StageType stageType,
-            Integer sortOrder
+            Integer sortOrder,
+            StageStatus status
     ) {
     }
 
@@ -23,7 +25,8 @@ public final class StageDtos {
             UUID divisionId,
             String name,
             StageType stageType,
-            Integer sortOrder
+            Integer sortOrder,
+            StageStatus status
     ) {
     }
 }

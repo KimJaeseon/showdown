@@ -58,7 +58,7 @@ public class RoundRobinService {
             int officialOffset = (sequence * 2) % request.officialIds().size();
             List<UUID> assigned = List.of(request.officialIds().get(officialOffset), request.officialIds().get((officialOffset + 1) % request.officialIds().size()));
             adminService.createMatch(group.getTournament().getId(), new MatchRequest(group.getDivision().getId(), group.getStage().getId(),
-                    groupId, nextMatchNo++, at, court, request.matchDurationMinutes(), 3, null, assigned,
+                    groupId, nextMatchNo++, at, court, null, request.matchDurationMinutes(), 3, null, assigned,
                     pair.player1Id(), pair.player2Id(), MatchStatus.SCHEDULED));
             created++;
         }
