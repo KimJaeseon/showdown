@@ -96,7 +96,7 @@ class StageFinalRankingTests {
         Match match = adminService.createMatch(tournament.getId(), new MatchRequest(
                 division.getId(), stage.getId(), group.getId(), matchNo, time, "Court 1", null, 30, 1, null,
                 List.of(referee1.getId(), referee2.getId()),
-                player1.getId(), player2.getId(), MatchStatus.SCHEDULED));
+                player1.getId(), player2.getId(), MatchStatus.SCHEDULED, null, null));
         adminService.updateMatchSets(match.getId(), new MatchSetsUpdateRequest(match.getVersion(),
                 List.of(new MatchSetRequest(1, 11, 6)), null));
     }

@@ -446,6 +446,7 @@ public class TournamentAdminService {
         if (match.getGroup() != null) {
             rankingService.recalculate(match.getGroup());
         }
+        propagateWinnerToNextRound(match);
         auditLogService.record(match.getTournament(), "SPECIAL_RESULT_CONFIRMED", "match", match.getId(), before, scoreState(match));
         return match;
     }
@@ -466,9 +467,25 @@ public class TournamentAdminService {
         if (match.getGroup() != null) {
             rankingService.recalculate(match.getGroup());
         }
+        propagateWinnerToNextRound(match);
         auditLogService.record(match.getTournament(), "RESULT_CONFIRMED", "match", match.getId(),
                 Map.of("status", MatchStatus.RUNNING.name()), scoreState(match));
         return match;
+    }
+
+    /** TDD-23: 토너먼트 다음 라운드 슬롯이 이 경기를 승자 참조로 두고 있다면 승자를 자동으로 채워 넣는다. */
+    private void propagateWinnerToNextRound(Match completedMatch) {
+        if (completedMatch.getWinner() == null) {
+            return;
+        }
+        for (Match dependent : matches.findByPlayer1SourceMatch_Id(completedMatch.getId())) {
+            dependent.setPlayer1(completedMatch.getWinner());
+            dependent.setPlayer1SourceMatch(null);
+        }
+        for (Match dependent : matches.findByPlayer2SourceMatch_Id(completedMatch.getId())) {
+            dependent.setPlayer2(completedMatch.getWinner());
+            dependent.setPlayer2SourceMatch(null);
+        }
     }
 
     private Map<String, Object> scoreState(Match match) {
@@ -686,9 +703,18 @@ public class TournamentAdminService {
         int maxSets = request.maxSets() == null ? 3 : request.maxSets();
         if (maxSets != 1 && maxSets != 3 && maxSets != 5) throw new IllegalArgumentException("경기 형식은 1·3·5세트제만 지원합니다.");
         match.setMaxSets(maxSets);
-        match.setPlayer1(getTournamentPlayer(request.player1TournamentPlayerId()));
-        match.setPlayer2(getTournamentPlayer(request.player2TournamentPlayerId()));
-        if (request.player1TournamentPlayerId().equals(request.player2TournamentPlayerId())) {
+        match.setPlayer1(request.player1TournamentPlayerId() == null ? null : getTournamentPlayer(request.player1TournamentPlayerId()));
+        match.setPlayer2(request.player2TournamentPlayerId() == null ? null : getTournamentPlayer(request.player2TournamentPlayerId()));
+        match.setPlayer1SourceMatch(resolveSourceMatch(match.getTournament(), request.player1SourceMatchId()));
+        match.setPlayer2SourceMatch(resolveSourceMatch(match.getTournament(), request.player2SourceMatchId()));
+        if (match.getPlayer1() == null && match.getPlayer1SourceMatch() == null) {
+            throw new IllegalArgumentException("선수 1은 실제 선수 또는 이전 경기 승자 참조 중 하나가 필요합니다.");
+        }
+        if (match.getPlayer2() == null && match.getPlayer2SourceMatch() == null) {
+            throw new IllegalArgumentException("선수 2는 실제 선수 또는 이전 경기 승자 참조 중 하나가 필요합니다.");
+        }
+        if (match.getPlayer1() != null && match.getPlayer2() != null
+                && match.getPlayer1().getId().equals(match.getPlayer2().getId())) {
             throw new IllegalArgumentException("같은 선수를 경기 양쪽에 배정할 수 없습니다.");
         }
         match.setStatus(request.status() == null ? MatchStatus.SCHEDULED : request.status());
@@ -699,6 +725,17 @@ public class TournamentAdminService {
         List<Official> assignedOfficials = resolveAssignedOfficials(match.getTournament(), request.refereeOfficialIds());
         validateScheduleConflicts(match, assignedOfficials);
         match.replaceOfficials(assignedOfficials);
+    }
+
+    private Match resolveSourceMatch(Tournament tournament, UUID sourceMatchId) {
+        if (sourceMatchId == null) {
+            return null;
+        }
+        Match sourceMatch = getMatch(sourceMatchId);
+        if (!sourceMatch.getTournament().getId().equals(tournament.getId())) {
+            throw new IllegalArgumentException("이전 경기 참조는 같은 대회의 경기여야 합니다.");
+        }
+        return sourceMatch;
     }
 
     private Court resolveCourt(Tournament tournament, UUID courtId) {
@@ -764,8 +801,12 @@ public class TournamentAdminService {
             if (hasOfficialConflict) {
                 throw new IllegalArgumentException("같은 시간대에 동일 심판을 중복 배정할 수 없습니다.");
             }
-            Set<UUID> targetPlayers = Set.of(target.getPlayer1().getId(), target.getPlayer2().getId());
-            if (targetPlayers.contains(existing.getPlayer1().getId()) || targetPlayers.contains(existing.getPlayer2().getId())) {
+            Set<UUID> targetPlayers = new HashSet<>();
+            if (target.getPlayer1() != null) targetPlayers.add(target.getPlayer1().getId());
+            if (target.getPlayer2() != null) targetPlayers.add(target.getPlayer2().getId());
+            boolean hasPlayerConflict = (existing.getPlayer1() != null && targetPlayers.contains(existing.getPlayer1().getId()))
+                    || (existing.getPlayer2() != null && targetPlayers.contains(existing.getPlayer2().getId()));
+            if (hasPlayerConflict) {
                 throw new IllegalArgumentException("같은 시간대에 동일 선수를 중복 배정할 수 없습니다.");
             }
         }
@@ -788,19 +829,19 @@ public class TournamentAdminService {
     private void validateMatchReferences(Tournament tournament, MatchRequest request) {
         Division division = getDivision(request.divisionId());
         Stage stage = stages.findById(request.stageId()).orElseThrow(() -> new EntityNotFoundException("단계를 찾을 수 없습니다."));
-        TournamentPlayer player1 = getTournamentPlayer(request.player1TournamentPlayerId());
-        TournamentPlayer player2 = getTournamentPlayer(request.player2TournamentPlayerId());
-        if (player1.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE
-                || player2.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE) {
+        TournamentPlayer player1 = request.player1TournamentPlayerId() == null ? null : getTournamentPlayer(request.player1TournamentPlayerId());
+        TournamentPlayer player2 = request.player2TournamentPlayerId() == null ? null : getTournamentPlayer(request.player2TournamentPlayerId());
+        if ((player1 != null && player1.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE)
+                || (player2 != null && player2.getStatus() != com.showdown.backend.domain.ParticipantStatus.ACTIVE)) {
             throw new IllegalArgumentException("기권 또는 실격 선수는 경기에 배정할 수 없습니다.");
         }
         requireSameTournament(tournament, division.getTournament(), "부문");
         requireSameTournament(tournament, stage.getTournament(), "단계");
-        requireSameTournament(tournament, player1.getTournament(), "선수 1");
-        requireSameTournament(tournament, player2.getTournament(), "선수 2");
+        if (player1 != null) requireSameTournament(tournament, player1.getTournament(), "선수 1");
+        if (player2 != null) requireSameTournament(tournament, player2.getTournament(), "선수 2");
         if (!stage.getDivision().getId().equals(division.getId())
-                || !player1.getDivision().getId().equals(division.getId())
-                || !player2.getDivision().getId().equals(division.getId())) {
+                || (player1 != null && !player1.getDivision().getId().equals(division.getId()))
+                || (player2 != null && !player2.getDivision().getId().equals(division.getId()))) {
             throw new IllegalArgumentException("경기의 단계와 선수는 같은 부문에 속해야 합니다.");
         }
         if (request.groupId() != null) {

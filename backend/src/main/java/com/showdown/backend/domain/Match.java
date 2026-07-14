@@ -64,6 +64,14 @@ public class Match extends BaseEntity {
     @JoinColumn(name = "winner_tournament_player_id")
     private TournamentPlayer winner;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "player1_source_match_id")
+    private Match player1SourceMatch;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "player2_source_match_id")
+    private Match player2SourceMatch;
+
     @Column(nullable = false, length = 30)
     @ColumnTransformer(write = "?::match_status")
     private MatchStatus status = MatchStatus.SCHEDULED;
@@ -201,6 +209,22 @@ public class Match extends BaseEntity {
 
     public void setWinner(TournamentPlayer winner) {
         this.winner = winner;
+    }
+
+    public Match getPlayer1SourceMatch() {
+        return player1SourceMatch;
+    }
+
+    public void setPlayer1SourceMatch(Match player1SourceMatch) {
+        this.player1SourceMatch = player1SourceMatch;
+    }
+
+    public Match getPlayer2SourceMatch() {
+        return player2SourceMatch;
+    }
+
+    public void setPlayer2SourceMatch(Match player2SourceMatch) {
+        this.player2SourceMatch = player2SourceMatch;
     }
 
     public MatchStatus getStatus() {

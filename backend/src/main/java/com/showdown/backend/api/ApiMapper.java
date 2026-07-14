@@ -153,7 +153,9 @@ public final class ApiMapper {
                 match.getPlayer1TotalPoints(),
                 match.getPlayer2TotalPoints(),
                 match.getVersion(),
-                sets.stream().map(ApiMapper::toMatchSetResponse).toList()
+                sets.stream().map(ApiMapper::toMatchSetResponse).toList(),
+                match.getPlayer1SourceMatch() == null ? null : match.getPlayer1SourceMatch().getId(),
+                match.getPlayer2SourceMatch() == null ? null : match.getPlayer2SourceMatch().getId()
         );
     }
 

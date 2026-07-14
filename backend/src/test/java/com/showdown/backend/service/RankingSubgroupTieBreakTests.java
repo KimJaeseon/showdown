@@ -115,7 +115,7 @@ class RankingSubgroupTieBreakTests {
         Match match = adminService.createMatch(tournament.getId(), new MatchRequest(
                 division.getId(), stage.getId(), group.getId(), matchNo[0]++, time[0], "Court 1", null, 30, 1, null,
                 List.of(referee1.getId(), referee2.getId()),
-                player1.getId(), player2.getId(), MatchStatus.SCHEDULED));
+                player1.getId(), player2.getId(), MatchStatus.SCHEDULED, null, null));
         time[0] = time[0].plusMinutes(30);
 
         MatchSetRequest set = side1Wins ? new MatchSetRequest(1, 11, 6) : new MatchSetRequest(1, 6, 11);

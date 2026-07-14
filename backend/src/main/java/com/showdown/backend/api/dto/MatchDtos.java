@@ -26,9 +26,11 @@ public final class MatchDtos {
             Integer maxSets,
             String refereeName,
             List<UUID> refereeOfficialIds,
-            @NotNull UUID player1TournamentPlayerId,
-            @NotNull UUID player2TournamentPlayerId,
-            MatchStatus status
+            UUID player1TournamentPlayerId,
+            UUID player2TournamentPlayerId,
+            MatchStatus status,
+            UUID player1SourceMatchId,
+            UUID player2SourceMatchId
     ) {
     }
 
@@ -60,7 +62,9 @@ public final class MatchDtos {
             Integer player1TotalPoints,
             Integer player2TotalPoints,
             Integer version,
-            List<MatchSetResponse> sets
+            List<MatchSetResponse> sets,
+            UUID player1SourceMatchId,
+            UUID player2SourceMatchId
     ) {
     }
 

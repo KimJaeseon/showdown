@@ -1,4 +1,4 @@
-Showdown 구현요구서 TDD 개발 요건 v0.5
+Showdown 구현요구서 TDD 개발 요건 v0.6
 
 적용 대상
 - showdown_implementation_requirements.txt
@@ -219,9 +219,13 @@ TDD-22 역할 코드 완전성 [해결됨 2026-07-13]
 - TournamentAdminService.applyUser가 role이 TOURNAMENT_ADMIN이면 tournamentId를 필수로 요구하고 대회 범위 역할로 저장하며, 그 외 역할에는 tournamentId를 허용하지 않는다.
 - 별도의 회귀 테스트는 추가하지 않았다. TDD-20의 재현 테스트가 tournament_admin 역할 배정 경로(AppUser.replaceRole)를 실질적으로 검증한다.
 
-TDD-23 토너먼트 대진 다라운드 생성
-- ScheduleService.generateKnockout(ScheduleService.java:94-132)은 첫 라운드만 생성하며 홀수 인원 부전승 자동 삽입과 다음 라운드 승자 연결이 없다.
-- 부전승 자동 배정과 라운드 간 승자 연결을 검증하는 단위 테스트를 실패 상태로 먼저 작성한다.
+TDD-23 토너먼트 대진 다라운드 생성 [해결됨 2026-07-14]
+- Match에 player1SourceMatch/player2SourceMatch 자기 참조 컬럼(V4 마이그레이션)을 추가해, 선수가 아직 정해지지 않은 다음 라운드 슬롯이 이전 경기를 승자 참조로 가질 수 있게 했다. MatchRequest/MatchResponse의 player1TournamentPlayerId/player2TournamentPlayerId를 nullable로 완화하고, 각 슬롯은 실제 선수 또는 이전 경기 참조 중 하나를 반드시 가지도록 검증한다(TournamentAdminService.applyMatch).
+- 경기 확정(completeMatch)과 특수 종료(finishMatchSpecial) 양쪽에서 propagateWinnerToNextRound를 호출해, 완료된 경기를 참조하는 다음 라운드 슬롯에 승자를 자동으로 채워 넣는다.
+- ScheduleService.generateKnockout을 재작성해 참가자 수가 2의 거듭제곱이 아니면 상위 시드부터 부전승을 받아 1라운드를 건너뛰게 하고, 준결승까지 모든 라운드를 미정 슬롯으로 자동 생성한다. 라운드별로 필요한 코트 회전 수(wave)를 계산해 다음 라운드 시작 시각을 정확히 이후로 미루도록 했다(처음 구현에서는 라운드당 대기 시간을 한 번만 더해 코트가 부족할 때 다음 라운드와 그 다음 라운드가 겹치는 버그가 있었고, 재현 테스트가 이를 실제로 잡아냈다).
+- validateMatchReferences와 validateScheduleConflicts를 선수가 null인 슬롯에 대해 안전하게 동작하도록 수정했다(기권·실격 상태 검사, 부문 일치 검사, 동일 선수 중복 배정 검사를 모두 null-가드 처리).
+- 재현 테스트: KnockoutBracketTests.fiveEntrantBracketGivesTopSeedsByesAndAdvancesWinnersAutomatically가 5명 참가(8강 브래킷, 부전승 3명) 시나리오에서 1라운드 대진, 2라운드의 부전승·미정 슬롯 구성, 결승의 미정 슬롯을 검증하고, 1라운드 경기를 확정한 뒤 2라운드 미정 슬롯에 승자가 자동으로 채워지는지 확인한다. 수정 전(코트 충돌 버그) 실패, 이후 승자 자동 연결 로직을 끈 상태에서도 실패를 확인한 뒤, 최종 수정으로 통과를 확인했다.
+- 범위 밖으로 남긴 것: 시드 배치는 "상위 시드가 늦게 만나도록" 하는 표준 브래킷 배치가 아니라 단순 순차 페어링이다(문서화된 단순화). 프런트엔드 관리자 화면에는 토너먼트 대진 생성 UI가 아직 없다.
 
 TDD-24 코트 엔티티 및 관계 기반 충돌 검사 [해결됨 2026-07-14]
 - Court 엔티티(domain/Court.java)와 CourtRepository를 추가했다. courts 테이블은 이미 스키마에 있었으나 매핑이 없었다. 코트 CRUD API(POST/PUT/DELETE /api/admin/.../courts, GET 조회)를 official과 동일한 패턴으로 추가했다.

@@ -11,4 +11,8 @@ public interface MatchRepository extends JpaRepository<Match, UUID> {
     List<Match> findByTournamentIdAndScheduledAtIsNotNullOrderByScheduledAtAscMatchNoAsc(UUID tournamentId);
 
     List<Match> findByMatchPlayers_TournamentPlayer_IdOrderByScheduledAtAscMatchNoAsc(UUID tournamentPlayerId);
+
+    List<Match> findByPlayer1SourceMatch_Id(UUID matchId);
+
+    List<Match> findByPlayer2SourceMatch_Id(UUID matchId);
 }

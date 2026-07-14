@@ -63,12 +63,12 @@ class CourtConflictTests {
 
         adminService.createMatch(tournament.getId(), new MatchRequest(
                 division.getId(), stage.getId(), null, 1, time, "Court 1", court.getId(), 30, 3, null,
-                List.of(referee1.getId(), referee2.getId()), p1.getId(), p2.getId(), MatchStatus.SCHEDULED));
+                List.of(referee1.getId(), referee2.getId()), p1.getId(), p2.getId(), MatchStatus.SCHEDULED, null, null));
 
         // 같은 court_id를 배정하지만 courtName 표기는 다르게 입력한다.
         assertThatThrownBy(() -> adminService.createMatch(tournament.getId(), new MatchRequest(
                         division.getId(), stage.getId(), null, 2, time, "코트1", court.getId(), 30, 3, null,
-                        List.of(referee1.getId(), referee2.getId()), p3.getId(), p4.getId(), MatchStatus.SCHEDULED)))
+                        List.of(referee1.getId(), referee2.getId()), p3.getId(), p4.getId(), MatchStatus.SCHEDULED, null, null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("코트");
     }
@@ -94,7 +94,7 @@ class CourtConflictTests {
         assertThatThrownBy(() -> adminService.createMatch(tournament.getId(), new MatchRequest(
                         division.getId(), stage.getId(), null, 1,
                         OffsetDateTime.parse("2026-07-01T09:00:00+09:00"), "Court 2", inactiveCourt.getId(), 30, 3, null,
-                        List.of(referee1.getId(), referee2.getId()), p1.getId(), p2.getId(), MatchStatus.SCHEDULED)))
+                        List.of(referee1.getId(), referee2.getId()), p1.getId(), p2.getId(), MatchStatus.SCHEDULED, null, null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("비활성 코트");
     }

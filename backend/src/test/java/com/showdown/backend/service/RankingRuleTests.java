@@ -82,7 +82,7 @@ class RankingRuleTests {
                 division.getId(), stage.getId(), group.getId(), 1,
                 OffsetDateTime.parse("2026-07-01T10:00:00+09:00"), "Court 1", null, 30, 3, null,
                 List.of(referee1.getId(), referee2.getId()),
-                player1.getId(), player2.getId(), MatchStatus.SCHEDULED));
+                player1.getId(), player2.getId(), MatchStatus.SCHEDULED, null, null));
 
         adminService.updateMatchSets(match.getId(), new MatchSetsUpdateRequest(match.getVersion(), List.of(
                 new MatchSetRequest(1, 11, 7),

@@ -82,6 +82,8 @@ public class ScheduleService {
                             refereeIds,
                             groupPlayers.get(i).getId(),
                             groupPlayers.get(j).getId(),
+                            null,
+                            null,
                             null
                     ));
                     createdMatchIds.add(match.getId());
@@ -92,6 +94,11 @@ public class ScheduleService {
         return new ScheduleGenerateResponse(groups.size(), createdMatchIds.size(), createdMatchIds);
     }
 
+    /**
+     * TDD-23: 단일 엘리미네이션 토너먼트 전체 라운드를 생성한다.
+     * 참가자 수가 2의 거듭제곱이 아니면 상위 시드부터 부전승을 받아 1라운드를 건너뛰고,
+     * 이후 라운드는 이전 라운드 경기의 승자를 자동으로 이어받는 미정(TBD) 슬롯으로 생성한다.
+     */
     public ScheduleGenerateResponse generateKnockout(UUID tournamentId, KnockoutGenerateRequest request) {
         validateGenerationRequest(1, request.courtNames(), request.matchDurationMinutes(), request.officialIds());
         List<UUID> entrantIds = request.playerIds() == null || request.playerIds().isEmpty()
@@ -101,36 +108,106 @@ public class ScheduleService {
                         .map(TournamentPlayer::getId)
                         .toList()
                 : request.playerIds();
-        if (entrantIds.size() != request.entrantCount() || entrantIds.size() % 2 != 0) {
-            throw new IllegalArgumentException("토너먼트 첫 라운드 참가자는 짝수이며 entrantCount와 일치해야 합니다.");
+        if (entrantIds.size() != request.entrantCount() || entrantIds.size() < 2) {
+            throw new IllegalArgumentException("토너먼트 참가자는 2명 이상이며 entrantCount와 일치해야 합니다.");
         }
 
+        List<TournamentPlayer> sortedEntrants = entrantIds.stream()
+                .map(adminService::getTournamentPlayer)
+                .sorted(Comparator.comparingInt(player -> player.getSeedNo() == null ? Integer.MAX_VALUE : player.getSeedNo()))
+                .toList();
+        int bracketSize = Integer.highestOneBit(sortedEntrants.size() - 1) * 2;
+        int byeCount = bracketSize - sortedEntrants.size();
+        List<TournamentPlayer> byeRecipients = sortedEntrants.subList(0, byeCount);
+        List<TournamentPlayer> playing = sortedEntrants.subList(byeCount, sortedEntrants.size());
+
         List<UUID> createdMatchIds = new ArrayList<>();
-        int matchNo = request.matchNoStart();
-        for (int i = 0; i < entrantIds.size(); i += 2) {
-            int sequence = i / 2;
-            String court = request.courtNames().get(sequence % request.courtNames().size());
-            OffsetDateTime scheduledAt = request.startAt().plusMinutes((long) request.matchDurationMinutes() * (sequence / request.courtNames().size()));
-            List<UUID> refereeIds = rotatingOfficials(request.officialIds(), sequence);
-            Match match = adminService.createMatch(tournamentId, new MatchRequest(
-                    request.divisionId(),
-                    request.stageId(),
-                    null,
-                    matchNo++,
-                    scheduledAt,
-                    court,
-                    null,
-                    request.matchDurationMinutes(),
-                    3,
-                    null,
-                    refereeIds,
-                    entrantIds.get(i),
-                    entrantIds.get(i + 1),
-                    null
-            ));
-            createdMatchIds.add(match.getId());
+        int[] matchNo = {request.matchNoStart()};
+        int[] globalSequence = {0};
+        OffsetDateTime roundStart = request.startAt();
+
+        List<Slot> nextRoundSlots = new ArrayList<>();
+        for (TournamentPlayer bye : byeRecipients) {
+            nextRoundSlots.add(Slot.ofPlayer(bye));
         }
-        return new ScheduleGenerateResponse(0, createdMatchIds.size(), createdMatchIds);
+        int withinRound = 0;
+        for (int i = 0; i < playing.size(); i += 2) {
+            Match match = createBracketMatch(tournamentId, request, matchNo, globalSequence, withinRound++, roundStart,
+                    playing.get(i).getId(), null, playing.get(i + 1).getId(), null);
+            createdMatchIds.add(match.getId());
+            nextRoundSlots.add(Slot.ofMatch(match));
+        }
+
+        List<Slot> currentSlots = nextRoundSlots;
+        int roundCount = currentSlots.isEmpty() ? 0 : 1;
+        int matchesInRound = playing.size() / 2;
+        int courtCount = request.courtNames().size();
+        while (currentSlots.size() > 1) {
+            int waves = matchesInRound == 0 ? 0 : (matchesInRound + courtCount - 1) / courtCount;
+            roundStart = roundStart.plusMinutes((long) request.matchDurationMinutes() * waves);
+            List<Slot> next = new ArrayList<>();
+            withinRound = 0;
+            for (int i = 0; i < currentSlots.size(); i += 2) {
+                Slot left = currentSlots.get(i);
+                Slot right = currentSlots.get(i + 1);
+                Match match = createBracketMatch(tournamentId, request, matchNo, globalSequence, withinRound++, roundStart,
+                        left.player == null ? null : left.player.getId(),
+                        left.sourceMatch == null ? null : left.sourceMatch.getId(),
+                        right.player == null ? null : right.player.getId(),
+                        right.sourceMatch == null ? null : right.sourceMatch.getId());
+                createdMatchIds.add(match.getId());
+                next.add(Slot.ofMatch(match));
+            }
+            matchesInRound = currentSlots.size() / 2;
+            currentSlots = next;
+            roundCount++;
+        }
+        return new ScheduleGenerateResponse(roundCount, createdMatchIds.size(), createdMatchIds);
+    }
+
+    private Match createBracketMatch(UUID tournamentId, KnockoutGenerateRequest request, int[] matchNo, int[] globalSequence,
+            int withinRoundIndex, OffsetDateTime roundStart, UUID player1Id, UUID player1SourceMatchId, UUID player2Id, UUID player2SourceMatchId) {
+        String court = request.courtNames().get(withinRoundIndex % request.courtNames().size());
+        OffsetDateTime matchTime = roundStart.plusMinutes((long) request.matchDurationMinutes() * (withinRoundIndex / request.courtNames().size()));
+        List<UUID> refereeIds = rotatingOfficials(request.officialIds(), globalSequence[0]);
+        globalSequence[0]++;
+        return adminService.createMatch(tournamentId, new MatchRequest(
+                request.divisionId(),
+                request.stageId(),
+                null,
+                matchNo[0]++,
+                matchTime,
+                court,
+                null,
+                request.matchDurationMinutes(),
+                3,
+                null,
+                refereeIds,
+                player1Id,
+                player2Id,
+                null,
+                player1SourceMatchId,
+                player2SourceMatchId
+        ));
+    }
+
+    /** 다음 라운드의 한 슬롯: 확정된 선수(player) 또는 아직 승자가 정해지지 않은 경기(sourceMatch) 중 하나를 가진다. */
+    private static final class Slot {
+        private final TournamentPlayer player;
+        private final Match sourceMatch;
+
+        private Slot(TournamentPlayer player, Match sourceMatch) {
+            this.player = player;
+            this.sourceMatch = sourceMatch;
+        }
+
+        private static Slot ofPlayer(TournamentPlayer player) {
+            return new Slot(player, null);
+        }
+
+        private static Slot ofMatch(Match match) {
+            return new Slot(null, match);
+        }
     }
 
     @Transactional(readOnly = true)
